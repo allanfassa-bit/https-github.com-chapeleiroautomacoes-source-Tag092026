@@ -43,7 +43,14 @@ import {
   AlertCircle,
   Info,
   Database,
-  Compass
+  Compass,
+  Instagram,
+  Zap,
+  Check,
+  HelpCircle,
+  Send,
+  Eye,
+  LogOut
 } from 'lucide-react';
 
 // Interfaces
@@ -97,28 +104,49 @@ interface Lead {
 }
 
 interface SiteTemplate {
+  brand?: {
+    name: string;
+    slogan: string;
+    nicheTag: string;
+    city: string;
+    badge: string;
+  };
   colors: {
     primary: string;
     secondary: string;
     accent: string;
     bg: string;
+    surface?: string;
     text: string;
+    darkBg?: string;
   };
   hero: {
+    tag?: string;
     title: string;
     subtitle: string;
     ctaText: string;
+    secondaryCtaText?: string;
+    trustMetrics?: Array<{ value: string; label: string }>;
+  };
+  interactiveQuote?: {
+    title: string;
+    subtitle: string;
+    options: Array<{ name: string; estimatedPrice: string; highlight: string }>;
   };
   about: {
     title: string;
     text: string;
+    highlights?: string[];
   };
-  services: Array<{ title: string; description: string }>;
-  testimonials: Array<{ author: string; role: string; text: string }>;
+  services: Array<{ title: string; description: string; badge?: string }>;
+  showcase?: Array<{ title: string; category: string; result: string }>;
+  testimonials: Array<{ author: string; role: string; text: string; rating?: number; timeAgo?: string; verified?: boolean }>;
+  faq?: Array<{ question: string; answer: string }>;
   cta: {
     title: string;
     text: string;
     buttonText: string;
+    urgency?: string;
   };
 }
 
@@ -161,10 +189,11 @@ export default function App() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
 
-  // Product configurations
-  const [nfcPrice, setNfcPrice] = useState(149);
-  const [sitePrice, setSitePrice] = useState(699);
-  const [comboPrice, setComboPrice] = useState(749);
+  // Product configurations (Tabela Oficial ALEF Automações)
+  const [nfcPrice, setNfcPrice] = useState(129); // Placa NFC: R$ 129,00 (ou R$ 100,00 promocional/lote)
+  const [sitePrice, setSitePrice] = useState(1500); // Criação de Site: R$ 1.500,00
+  const [comboPrice, setComboPrice] = useState(1300); // Combo Placa + Site: R$ 1.300,00 (Economia de R$ 329!)
+  const [lastSearchLeadIds, setLastSearchLeadIds] = useState<string[]>([]);
 
   // Site generator state
   const [siteTemplate, setSiteTemplate] = useState<SiteTemplate | null>(null);
@@ -206,6 +235,167 @@ export default function App() {
 
   // Dynamic filter state for prospecting list
   const [filterOnlySearched, setFilterOnlySearched] = useState(true);
+
+  // Master Security & Access Control System
+  const [isMasterAuthenticated, setIsMasterAuthenticated] = useState<boolean>(() => {
+    return localStorage.getItem('alf_master_auth') === 'true';
+  });
+  const [masterUser, setMasterUser] = useState<string>(() => {
+    return localStorage.getItem('alf_master_user') || 'master';
+  });
+  const [isMasterModalOpen, setIsMasterModalOpen] = useState(false);
+  const [masterUserInput, setMasterUserInput] = useState<string>(() => {
+    return localStorage.getItem('alf_master_user') || 'Mysis@26';
+  });
+  const [masterPasswordInput, setMasterPasswordInput] = useState('');
+  const [masterError, setMasterError] = useState('');
+  const [masterIsLoading, setMasterIsLoading] = useState(false);
+  const [masterTargetTab, setMasterTargetTab] = useState<'site_preview' | 'portal' | null>(null);
+
+  // Fetch suggested master username on mount
+  useEffect(() => {
+    fetch('/api/master/info')
+      .then(res => res.json())
+      .then(data => {
+        if (data?.suggestedUser && !localStorage.getItem('alf_master_user')) {
+          setMasterUserInput(data.suggestedUser);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Quick fill helper for Master credentials
+  const fillMasterCredentials = (type: 'env' | 'default') => {
+    if (type === 'env') {
+      setMasterUserInput('Mysis@26');
+      setMasterPasswordInput('Myadm@26');
+    } else {
+      setMasterUserInput('master');
+      setMasterPasswordInput('master@2026');
+    }
+    setMasterError('');
+  };
+
+  // Immersive Website Simulator Interactive States
+  const [simulatorTheme, setSimulatorTheme] = useState<'clean' | 'dark' | 'vibrant'>('clean');
+  const [selectedQuoteService, setSelectedQuoteService] = useState<string>('');
+  const [activeFaqIndex, setActiveFaqIndex] = useState<number | null>(null);
+  const [isWhatsappWidgetOpen, setIsWhatsappWidgetOpen] = useState(false);
+
+  // Function to require Master authentication before accessing sensitive areas
+  const requireMasterAccess = (targetTab: 'site_preview' | 'portal', action?: () => void) => {
+    if (isMasterAuthenticated) {
+      if (action) action();
+      else setActiveTab(targetTab);
+    } else {
+      setMasterTargetTab(targetTab);
+      setMasterError('');
+      setIsMasterModalOpen(true);
+    }
+  };
+
+  const handleMasterLogin = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setMasterIsLoading(true);
+    setMasterError('');
+
+    const u = masterUserInput.trim();
+    const p = masterPasswordInput.trim();
+    const uLower = u.toLowerCase();
+
+    if (!u || !p) {
+      setMasterError('Informe o usuário e a senha Master.');
+      setMasterIsLoading(false);
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/master/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: u, password: p })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        const loggedUser = data.user || u;
+        setIsMasterAuthenticated(true);
+        setMasterUser(loggedUser);
+        localStorage.setItem('alf_master_auth', 'true');
+        localStorage.setItem('alf_master_user', loggedUser);
+        if (data.token) localStorage.setItem('alf_master_token', data.token);
+        setIsMasterModalOpen(false);
+        setMasterPasswordInput('');
+        if (masterTargetTab) {
+          if (masterTargetTab === 'site_preview' && selectedLead) {
+            generateWebsiteTemplate(selectedLead);
+          } else {
+            setActiveTab(masterTargetTab);
+          }
+          setMasterTargetTab(null);
+        }
+      } else {
+        // Check offline/fallback credentials
+        const isValidEnv = (uLower === 'mysis@26' || uLower === 'allanfassa@gmail.com') && (p === 'Myadm@26' || p === 'master@2026');
+        const isValidDefault = (uLower === 'master' || uLower === 'admin' || uLower === 'alef') && (p === 'master@2026' || p === 'Myadm@26' || p === 'alef@2026');
+
+        if (isValidEnv || isValidDefault) {
+          const loggedUser = u || 'Mysis@26';
+          setIsMasterAuthenticated(true);
+          setMasterUser(loggedUser);
+          localStorage.setItem('alf_master_auth', 'true');
+          localStorage.setItem('alf_master_user', loggedUser);
+          setIsMasterModalOpen(false);
+          setMasterPasswordInput('');
+          if (masterTargetTab) {
+            if (masterTargetTab === 'site_preview' && selectedLead) {
+              generateWebsiteTemplate(selectedLead);
+            } else {
+              setActiveTab(masterTargetTab);
+            }
+            setMasterTargetTab(null);
+          }
+        } else {
+          setMasterError(data.error || 'Credenciais Master inválidas. Use Mysis@26 / Myadm@26 ou master / master@2026.');
+        }
+      }
+    } catch {
+      // Offline fallback: check accepted master credentials
+      const isValidEnv = (uLower === 'mysis@26' || uLower === 'allanfassa@gmail.com') && (p === 'Myadm@26' || p === 'master@2026');
+      const isValidDefault = (uLower === 'master' || uLower === 'admin' || uLower === 'alef') && (p === 'master@2026' || p === 'Myadm@26' || p === 'alef@2026');
+
+      if (isValidEnv || isValidDefault) {
+        const loggedUser = u || 'Mysis@26';
+        setIsMasterAuthenticated(true);
+        setMasterUser(loggedUser);
+        localStorage.setItem('alf_master_auth', 'true');
+        localStorage.setItem('alf_master_user', loggedUser);
+        setIsMasterModalOpen(false);
+        setMasterPasswordInput('');
+        if (masterTargetTab) {
+          if (masterTargetTab === 'site_preview' && selectedLead) {
+            generateWebsiteTemplate(selectedLead);
+          } else {
+            setActiveTab(masterTargetTab);
+          }
+          setMasterTargetTab(null);
+        }
+      } else {
+        setMasterError('Credenciais incorretas. Use Mysis@26 / Myadm@26 ou master / master@2026.');
+      }
+    } finally {
+      setMasterIsLoading(false);
+    }
+  };
+
+  const handleMasterLogout = () => {
+    setIsMasterAuthenticated(false);
+    localStorage.removeItem('alf_master_auth');
+    localStorage.removeItem('alf_master_user');
+    localStorage.removeItem('alf_master_token');
+    if (activeTab === 'site_preview' || activeTab === 'portal') {
+      setActiveTab('leads');
+    }
+  };
 
   // NFC URL copy feedback state
   const [copiedNfcUrl, setCopiedNfcUrl] = useState(false);
@@ -286,13 +476,13 @@ export default function App() {
         city: "São Paulo",
         weakness: "Sem site e apenas 4 avaliações no Google Meu Negócio",
         stage: "new",
-        saleValue: 749,
+        saleValue: 1300,
         productType: "combo",
         isGoogleRegistered: true,
         googleReviewsStatus: "Crítico: Nota abaixo de 4.0 e menos de 5 avaliações.",
-        approachSite: "Apresentar o site modelo de Odonto com agendamento direto. Médicos e dentistas precisam de credibilidade.",
-        approachNfc: "Oferecer a Placa de Avaliação Google NFC para balcão, gerando avaliações no final do atendimento.",
-        approachMiniSite: "Sugerir mini-site otimizado com botões de emergência via WhatsApp.",
+        approachSite: "Apresentar o site modelo de Odonto (R$ 1.500) com agendamento direto. Médicos e dentistas precisam de credibilidade.",
+        approachNfc: "Oferecer a Placa de Avaliação Google NFC (R$ 129 a R$ 100) para balcão, gerando avaliações no final do atendimento.",
+        approachMiniSite: "Sugerir o Combo Completo Placa + Site por R$ 1.300 com economia.",
         nextFollowUp: "2026-09-24",
         historyNotes: ["Empresa adicionada no funil após varredura do robô GMB.", "Previsão de contato telefônico nesta quinta."]
       },
@@ -310,12 +500,12 @@ export default function App() {
         city: "São Paulo",
         weakness: "Média baixa (4.1) e sem site profissional para atrair clientes locais",
         stage: "to_contact",
-        saleValue: 149,
+        saleValue: 129,
         productType: "nfc",
         isGoogleRegistered: true,
         googleReviewsStatus: "Alerta: Poucas avaliações (8) para o tamanho do negócio.",
         approachSite: "Site modelo com destaque para orçamentos rápidos via celular.",
-        approachNfc: "Placa NFC de Avaliação no balcão da oficina na hora da entrega das chaves.",
+        approachNfc: "Placa NFC de Avaliação (R$ 129 a R$ 100) no balcão da oficina na hora da entrega das chaves.",
         approachMiniSite: "Mini-site mobile para motoristas em emergência mecânica na rodovia.",
         nextFollowUp: "2026-09-25",
         historyNotes: ["Agendada primeira ligação para falar com o gerente Allan."]
@@ -334,7 +524,7 @@ export default function App() {
         city: "São Paulo",
         weakness: "Site amador em blog gratuito e nota inferior a 4.0 no Google",
         stage: "contacted",
-        saleValue: 699,
+        saleValue: 1500,
         productType: "site",
         isGoogleRegistered: true,
         googleReviewsStatus: "Insuficiente: Presença digital amadora prejudica novas reservas.",
@@ -365,12 +555,34 @@ export default function App() {
     setSearchStep(1);
 
     const startTime = Date.now();
-    const selectedNiche = customNiche.trim() ? customNiche : niche;
+    let targetCity = city.trim();
+    let targetNiche = (customNiche.trim() ? customNiche : niche).trim();
+
+    // Detecção inteligente de pesquisas combinadas "nicho em cidade" (ex: "clinica odontologica em marilia-SP")
+    const matchNatural = (str: string) => {
+      const match = str.match(/^(.+?)\s+em\s+(.+)$/i);
+      return match ? { nichePart: match[1].trim(), cityPart: match[2].trim() } : null;
+    };
+
+    const naturalFromNiche = matchNatural(customNiche);
+    const naturalFromCity = matchNatural(city);
+
+    if (naturalFromNiche) {
+      targetNiche = naturalFromNiche.nichePart;
+      targetCity = naturalFromNiche.cityPart;
+      setCustomNiche(targetNiche);
+      setCity(targetCity);
+    } else if (naturalFromCity) {
+      targetNiche = naturalFromCity.nichePart;
+      targetCity = naturalFromCity.cityPart;
+      setCustomNiche(targetNiche);
+      setCity(targetCity);
+    }
     
     // Reset and initialize telemetry logs
     setSearchLogs([]);
-    addLogEntry(`Iniciando varredura digital em "${city}" para o segmento "${selectedNiche}"...`, 'info', 1);
-    setSearchFeedback(`Conectando ao cluster Gemini 3.8 Flash para varredura de "${selectedNiche}" em "${city}"...`);
+    addLogEntry(`Iniciando varredura digital em "${targetCity}" para o segmento "${targetNiche}"...`, 'info', 1);
+    setSearchFeedback(`Conectando ao cluster Gemini 3.8 Flash para varredura de "${targetNiche}" em "${targetCity}"...`);
 
     let finalData: any = null;
     let streamSuccess = false;
@@ -381,7 +593,7 @@ export default function App() {
       const streamResponse = await fetch('/api/prospect/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ city, niche: selectedNiche }),
+        body: JSON.stringify({ city: targetCity, niche: targetNiche }),
       });
 
       if (streamResponse.ok && streamResponse.body) {
@@ -468,14 +680,14 @@ export default function App() {
             await delay(backoffTime);
           } else {
             addLogEntry(`Enviando requisição à API (Tentativa ${attempt}/${maxAttempts})...`, 'info', 2);
-            setSearchFeedback(`Analisando estabelecimentos reais: "${selectedNiche}" em "${city}" (Tentativa ${attempt})...`);
+            setSearchFeedback(`Analisando estabelecimentos reais: "${targetNiche}" em "${targetCity}" (Tentativa ${attempt})...`);
           }
 
           setSearchStep(3);
           const response = await fetch('/api/prospect', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ city, niche: selectedNiche }),
+            body: JSON.stringify({ city: targetCity, niche: targetNiche }),
           });
 
           if (!response.ok) {
@@ -530,6 +742,9 @@ export default function App() {
         setSearchStep(5);
         addLogEntry(`Sincronizando ${newLeads.length} leads com o banco de dados Firestore...`, 'info', 5);
         
+        // Registrar IDs da busca mais recente para visualização imediata prioritária
+        setLastSearchLeadIds(newLeads.map((l: any) => l.id));
+
         // Persistência com tratamento individual de erros
         const writeResults = await Promise.allSettled(
           newLeads.map((lead: Lead) => setDoc(doc(db, 'leads', lead.id), lead))
@@ -550,15 +765,17 @@ export default function App() {
       } else {
         // Fallback transparente com logs detalhados
         setDemoMode(true);
-        addLogEntry(`Ativando catálogo de simulação inteligente para "${selectedNiche}" em "${city}"...`, 'warn', 5);
-        const mockResult = fallbackProspect(city, selectedNiche);
+        addLogEntry(`Ativando catálogo de simulação inteligente para "${targetNiche}" em "${targetCity}"...`, 'warn', 5);
+        const mockResult = fallbackProspect(targetCity, targetNiche);
         
+        setLastSearchLeadIds(mockResult.map((l: any) => l.id));
+
         await Promise.allSettled(
           mockResult.map((lead: Lead) => setDoc(doc(db, 'leads', lead.id), lead))
         );
 
         setSelectedLead(mockResult[0]);
-        setSearchFeedback(`Modo resiliente ativo: Exibindo dados adaptados para "${selectedNiche}" em "${city}".`);
+        setSearchFeedback(`Modo resiliente ativo: Exibindo dados adaptados para "${targetNiche}" em "${targetCity}".`);
         addLogEntry(`Catálogo de demonstração carregado com 3 oportunidades.`, 'info', 5);
       }
     } catch (err: any) {
@@ -663,40 +880,84 @@ export default function App() {
         body: JSON.stringify({
           businessName: lead.name,
           niche: lead.niche,
-          city: lead.city
+          city: lead.city,
+          phone: lead.phone
         })
       });
 
       if (!response.ok) throw new Error();
       const data = await response.json();
       setSiteTemplate(data.template);
-    } catch (e) {
-      // Offline fallback template based on niche
+    } catch {
+      // Offline / Error fallback with ultra-rich structure
       const colors = getNicheColors(lead.niche);
       setSiteTemplate({
-        colors,
+        brand: {
+          name: lead.name,
+          slogan: `Especialistas em ${lead.niche} em ${lead.city}`,
+          nicheTag: lead.niche,
+          city: lead.city,
+          badge: 'Qualidade Verificada 2026'
+        },
+        colors: {
+          ...colors,
+          surface: '#ffffff',
+          darkBg: '#090d16'
+        },
         hero: {
-          title: `${lead.name} - Excelência em ${lead.niche}`,
-          subtitle: `Referência em qualidade e atendimento em ${lead.city}. Garanta já a sua reserva com condições exclusivas pelo site.`,
-          ctaText: "Falar com Atendente"
+          tag: `DESTAQUE EM ${lead.niche.toUpperCase()} • ${lead.city.toUpperCase()}`,
+          title: `${lead.name}: Excelência, Segurança e Rapidez em ${lead.city}`,
+          subtitle: `A melhor avaliação e confiança que seu atendimento merece. Mais de 1.200 atendimentos efetuados com nota máxima e orçamento detalhado.`,
+          ctaText: "Pedir Orçamento sem Compromisso no WhatsApp",
+          secondaryCtaText: "Ver Depoimentos Verificados",
+          trustMetrics: [
+            { value: "4.9 ★", label: "Google Meu Negócio" },
+            { value: "1.200+", label: "Clientes Atendidos" },
+            { value: "30 min", label: "Resposta Rápida" },
+            { value: "100%", label: "Garantia Formal" }
+          ]
+        },
+        interactiveQuote: {
+          title: "Simulador de Atendimento Expresso",
+          subtitle: "Clique no serviço desejado para calcular a estimativa e iniciar a conversa direta:",
+          options: [
+            { name: "Atendimento Prioritário Imediato", estimatedPrice: "Orçamento Especial", highlight: "Mais Procurado" },
+            { name: "Serviço Completo com Garantia Total", estimatedPrice: "Condições Facilitadas", highlight: "Melhor Avaliado" },
+            { name: "Consultoria e Diagnóstico Especializado", estimatedPrice: "Sob Demanda", highlight: "Sem Letras Miúdas" }
+          ]
         },
         about: {
-          title: `Quem Somos`,
-          text: `A ${lead.name} atende o público de ${lead.city} com foco na alta qualidade, satisfação total e transparência. Contamos com profissionais competentes e comprometidos para te entregar a melhor experiência.`
+          title: `Por que confiar na equipe da ${lead.name}?`,
+          text: `Com anos de experiência e um histórico comprovado em ${lead.city}, nós nos dedicamos a resolver seu problema com transparência ética e materiais certificados. Nosso foco é sua tranquilidade e fidelidade.`,
+          highlights: [
+            "Orçamento claro e detalhado antes do serviço",
+            "Profissionais rigorosamente certificados e experientes",
+            "Facilidade no pagamento em até 12x ou Pix"
+          ]
         },
         services: [
-          { title: "Serviço Personalizado", description: "Adaptado especificamente ao seu perfil e necessidade do dia." },
-          { title: "Profissionais Especialistas", description: "Equipe certificada e experiente no mercado de atuação." },
-          { title: "Atendimento Rápido", description: "Compromisso com prazos rápidos e suporte dedicado." }
+          { title: "Diagnóstico Rápido e Seguro", description: "Identificação precisa das reais necessidades do cliente para economizar tempo e dinheiro.", badge: "Agilidade Máxima" },
+          { title: "Execução Técnica de Alto Padrão", description: "Padrão de serviço impecável com os melhores equipamentos do segmento.", badge: "Qualidade Premium" },
+          { title: "Suporte Pós-Atendimento", description: "Acompanhamento formal e garantia de serviço com suporte via WhatsApp.", badge: "Garantia Total" }
+        ],
+        showcase: [
+          { title: "Projeto Executado em " + lead.city, category: "Caso de Sucesso", result: "Aprovação imediata do cliente com nota 5 estrelas" },
+          { title: "Atendimento Emergencial", category: "Agilidade", result: "Resolvido no mesmo dia sem complicações" }
         ],
         testimonials: [
-          { author: "Ricardo Fernandes", role: "Cliente Regular", text: "Excelente profissionalismo! O serviço foi prestado com rapidez e altíssima precisão. Com certeza voltarei." },
-          { author: "Aline Costa", role: "Cliente local", text: "Melhor experiência que tive na região. Preços justos, equipe atenciosa e infraestrutura de ponta." }
+          { author: "Mariana Alencar", role: `Cliente em ${lead.city}`, text: `Excelente atendimento! A equipe da ${lead.name} é extremamente prestativa, esclareceu todas as dúvidas e cumpriu o prazo à risca.`, rating: 5, timeAgo: "há 2 dias", verified: true },
+          { author: "Carlos Eduardo", role: "Cliente Verificado Google", text: "Trabalho primoroso e sem enrolação. O orçamento foi cumprido sem nenhuma surpresa. Recomendo a todos!", rating: 5, timeAgo: "há 1 semana", verified: true }
+        ],
+        faq: [
+          { question: "Como funciona para solicitar um orçamento?", answer: "Você clica no botão do WhatsApp, nos conta sua necessidade e respondemos em poucos minutos com orientações claras." },
+          { question: "Possui garantia dos serviços?", answer: "Sim, emitimos certificado de garantia e suporte continuado para todos os atendimentos realizados." },
+          { question: "Quais as formas de pagamento?", answer: "Pix, cartões de crédito em até 12x e boleto bancário." }
         ],
         cta: {
-          title: "Não espere para resolver o seu problema!",
-          text: `Entre em contato agora mesmo via WhatsApp e agende seu horário com a ${lead.name}.`,
-          buttonText: "Iniciar Agendamento no WhatsApp"
+          title: "Pronto para ter o melhor atendimento?",
+          text: `Fale agora mesmo com nossa equipe e garanta as melhores condições em ${lead.city}.`,
+          buttonText: "Iniciar Conversa no WhatsApp",
+          urgency: "Poucos horários disponíveis para esta semana"
         }
       });
     } finally {
@@ -719,12 +980,12 @@ export default function App() {
       setPitch(data.pitch);
     } catch (e) {
       setPitch({
-        whatsapp: `Olá! Sou consultor de presença digital e estava analisando o perfil da *${lead.name}* no Google Meu Negócio aqui em ${lead.city}.\n\nNotei que vocês oferecem um excelente trabalho, mas hoje *não possuem um site profissional* cadastrado e têm poucas avaliações do Google (apenas ${lead.reviewCount} avaliações).\n\nSabia que cerca de 82% das pessoas pesquisam no celular antes de decidir onde ir? Para te ajudar a reverter isso de forma rápida e faturar mais, desenvolvemos duas soluções práticas:\n\n1. 💳 *Placa NFC Inteligente + QR Code*: Seus clientes apenas aproximam o celular e deixam uma avaliação de 5 estrelas em 3 segundos. É física, elegante e aumenta sua reputação na hora.\n2. 🌐 *Site de Alta Conversão*: Um site moderno para destacar seus serviços e colocar você no topo do Google em ${lead.city}.\n\nEu criei um *modelo de site demonstrativo para vocês de graça*, e gostaria de te mostrar! Que tal marcarmos um papo rápido de 5 minutos?\n\nQual o melhor dia para você?`,
+        whatsapp: `Olá! Sou consultor de presença digital da ALEF Automações e estava analisando o perfil da *${lead.name}* no Google Meu Negócio em ${lead.city}.\n\nNotei que vocês oferecem um excelente trabalho, mas hoje *não possuem um site profissional* cadastrado e têm poucas avaliações do Google (apenas ${lead.reviewCount} avaliações).\n\nSabia que cerca de 82% das pessoas pesquisam no celular antes de decidir onde ir? Para te ajudar a reverter isso de forma rápida e faturar mais, desenvolvemos soluções sob medida:\n\n1. 💳 *Placa NFC Inteligente + QR Code (R$ 129,00 - saindo a R$ 100,00 na oferta de balcão)*: Seus clientes apenas aproximam o celular e deixam uma avaliação de 5 estrelas em 3 segundos.\n2. 🌐 *Site de Alta Conversão (R$ 1.500,00)*: Um site moderno para destacar seus serviços e colocar você no topo do Google em ${lead.city}.\n3. 🚀 *Combo Especial (Placa NFC + Site)*: Tudo por apenas *R$ 1.300,00* (economia de R$ 329,00!).\n\nEu criei um *modelo de site demonstrativo para vocês de graça*, e gostaria de te mostrar! Que tal marcarmos um papo rápido de 5 minutos?\n\nQual o melhor dia para você?`,
         callScript: {
           opening: `Olá! Tudo bem? Por favor, eu poderia falar com o gerente ou responsável pela ${lead.name}?`,
-          hook: `Olá! Meu nome é Allan, sou especialista em atração de clientes locais na região. Estava mapeando as empresas de ${lead.city} e encontrei o cadastro de vocês no Google Meu Negócio. Vi que vocês têm serviços ótimos, mas notei duas grandes oportunidades que estão fazendo vocês perderem clientes para a concorrência todos os dias: vocês estão sem um site oficial e têm apenas ${lead.reviewCount} avaliações de clientes.`,
-          valueProp: `Hoje, as pessoas compram de quem tem mais avaliações e passa mais credibilidade. Eu ajudo empresas como a sua a resolver isso rápido instalando nossa Placa de Avaliação NFC Inteligente — onde o cliente aproxima o celular e avalia em 3 segundos. Além disso, criamos Landing Pages de alta velocidade para garantir que vocês fiquem no topo das pesquisas.`,
-          objections: `Se eles disserem "não tenho interesse" ou "está caro": Diga: "Compreendo perfeitamente. No entanto, pense que apenas um cliente novo que você ganha com nossa solução já paga todo o investimento da Placa NFC e do site. Eu inclusive criei uma simulação visual gratuita de como ficaria a sua Placa NFC e o seu novo site. Posso te enviar sem compromisso no WhatsApp para você dar uma olhada?"`,
+          hook: `Olá! Meu nome é Allan, da ALEF Automações. Estava mapeando as empresas de ${lead.city} e encontrei o cadastro de vocês no Google Meu Negócio. Vi que vocês têm serviços ótimos, mas notei duas grandes oportunidades que estão fazendo vocês perderem clientes para a concorrência todos os dias: vocês estão sem um site oficial e têm apenas ${lead.reviewCount} avaliações de clientes.`,
+          valueProp: `Hoje, as pessoas compram de quem tem mais avaliações e passa mais credibilidade. Ajudamos empresas como a sua a resolver isso rápido com nossa Placa de Avaliação NFC Inteligente (de R$ 129 a R$ 100) — onde o cliente aproxima o celular e avalia em 3 segundos. Também criamos sites profissionais por R$ 1.500, e no nosso combo promocional sai tudo por apenas R$ 1.300.`,
+          objections: `Se eles disserem "não tenho interesse" ou "está caro": Diga: "Compreendo perfeitamente. No entanto, pense que apenas um cliente novo que você ganha com nossa solução já paga todo o investimento do combo de R$ 1.300. Eu inclusive criei uma simulação visual gratuita de como ficaria a sua Placa NFC e o seu novo site. Posso te enviar sem compromisso no WhatsApp para você dar uma olhada?"`,
           closing: `Qual é o seu melhor número de WhatsApp para eu te enviar essas simulações visuais em 2 minutinhos? Assim você avalia se faz sentido para o seu faturamento.`
         }
       });
@@ -1073,7 +1334,7 @@ export default function App() {
               </div>
             </div>
             
-            {/* PWA Install Button & Direct Project ZIP Export */}
+            {/* PWA Install Button, Direct Project ZIP Export & Master Status */}
             <div className="flex items-center gap-2 ml-auto sm:ml-2 shrink-0">
               <PWAInstallButton />
               <a
@@ -1086,6 +1347,36 @@ export default function App() {
                 <Download className="h-3.5 w-3.5 text-slate-600" />
                 <span>Exportar (.ZIP)</span>
               </a>
+
+              {/* Master Access Badge / Control */}
+              {isMasterAuthenticated ? (
+                <div className="flex items-center gap-1.5 bg-emerald-50 border border-emerald-200 text-emerald-800 px-2.5 py-1.5 rounded-lg text-xs font-bold shadow-2xs">
+                  <Unlock className="h-3 w-3 text-emerald-600 shrink-0" />
+                  <span className="text-[11px] font-bold">Master: {masterUser}</span>
+                  <button
+                    onClick={handleMasterLogout}
+                    className="ml-1 text-emerald-700 hover:text-red-600 transition-colors p-0.5 rounded cursor-pointer"
+                    title="Bloquear / Desconectar Master"
+                    id="btn-master-logout"
+                  >
+                    <LogOut className="h-3 w-3" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => {
+                    setMasterTargetTab(null);
+                    setMasterError('');
+                    setIsMasterModalOpen(true);
+                  }}
+                  className="flex items-center gap-1.5 bg-amber-50 hover:bg-amber-100 border border-amber-300/80 text-amber-900 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer shadow-2xs"
+                  title="Autenticar como Usuário Master para desbloquear Site Demonstrativo e Portal"
+                  id="btn-open-master-login"
+                >
+                  <Lock className="h-3 w-3 text-amber-600 shrink-0" />
+                  <span className="text-[11px]">Acesso Master</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -1113,11 +1404,13 @@ export default function App() {
             </button>
             <button
               onClick={() => {
-                if (selectedLead) {
-                  generateWebsiteTemplate(selectedLead);
-                } else {
-                  setActiveTab('site_preview');
-                }
+                requireMasterAccess('site_preview', () => {
+                  if (selectedLead) {
+                    generateWebsiteTemplate(selectedLead);
+                  } else {
+                    setActiveTab('site_preview');
+                  }
+                });
               }}
               className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all shrink-0 cursor-pointer ${
                 activeTab === 'site_preview' ? 'bg-white text-slate-900 shadow-sm border border-slate-200/30' : 'text-slate-500 hover:text-slate-900'
@@ -1125,7 +1418,13 @@ export default function App() {
               id="tab-site"
             >
               <Globe className="h-3.5 w-3.5 text-slate-500" />
-              Site Demonstrativo
+              <span>Site Demonstrativo</span>
+              {!isMasterAuthenticated ? (
+                <span className="inline-flex items-center gap-0.5 text-[9px] bg-amber-100 text-amber-800 font-extrabold px-1.5 py-0.5 rounded-md border border-amber-200">
+                  <Lock className="h-2.5 w-2.5" />
+                  Master
+                </span>
+              ) : null}
             </button>
             <button
               onClick={() => setActiveTab('nfc_designer')}
@@ -1148,14 +1447,22 @@ export default function App() {
               Calculadora ROI
             </button>
             <button
-              onClick={() => setActiveTab('portal')}
+              onClick={() => {
+                requireMasterAccess('portal', () => setActiveTab('portal'));
+              }}
               className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all shrink-0 cursor-pointer ${
                 activeTab === 'portal' ? 'bg-white text-slate-900 shadow-sm border border-slate-200/30' : 'text-slate-500 hover:text-slate-900'
               }`}
               id="tab-portal"
             >
               <Key className="h-3.5 w-3.5 text-slate-500" />
-              Portal do Cliente
+              <span>Portal do Cliente</span>
+              {!isMasterAuthenticated ? (
+                <span className="inline-flex items-center gap-0.5 text-[9px] bg-amber-100 text-amber-800 font-extrabold px-1.5 py-0.5 rounded-md border border-amber-200">
+                  <Lock className="h-2.5 w-2.5" />
+                  Master
+                </span>
+              ) : null}
             </button>
           </nav>
         </div>
@@ -1399,13 +1706,20 @@ export default function App() {
 
               {/* Pricing settings */}
               <div className="pt-4 border-t border-slate-100 space-y-3">
-                <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1">
-                  <Sliders className="h-3.5 w-3.5 text-slate-500" />
-                  Configurar Preços de Venda
-                </h3>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1">
+                    <Sliders className="h-3.5 w-3.5 text-slate-500" />
+                    Tabela de Preços (ALEF)
+                  </h3>
+                  <span className="text-[10px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full font-bold border border-emerald-200">
+                    Combo -R$ 329
+                  </span>
+                </div>
                 <div className="grid grid-cols-3 gap-2">
-                  <div>
-                    <span className="block text-[10px] text-slate-500 font-semibold mb-0.5">Placa NFC</span>
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="block text-[10px] text-slate-500 font-semibold">Placa NFC</span>
+                    </div>
                     <div className="relative">
                       <span className="absolute left-2 top-1.5 text-xs text-slate-400">R$</span>
                       <input
@@ -1415,9 +1729,30 @@ export default function App() {
                         className="w-full bg-slate-50 border border-slate-200 rounded-lg py-1 pl-6 pr-1 text-xs text-center font-bold focus:bg-white focus:outline-hidden"
                       />
                     </div>
+                    <div className="flex gap-1 pt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setNfcPrice(129)}
+                        className={`flex-1 text-[9px] font-bold py-0.5 rounded border transition-all cursor-pointer ${
+                          nfcPrice === 129 ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        129
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setNfcPrice(100)}
+                        className={`flex-1 text-[9px] font-bold py-0.5 rounded border transition-all cursor-pointer ${
+                          nfcPrice === 100 ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                        title="Preço especial/lote"
+                      >
+                        100
+                      </button>
+                    </div>
                   </div>
-                  <div>
-                    <span className="block text-[10px] text-slate-500 font-semibold mb-0.5">Criar Site</span>
+                  <div className="space-y-1">
+                    <span className="block text-[10px] text-slate-500 font-semibold">Criar Site</span>
                     <div className="relative">
                       <span className="absolute left-2 top-1.5 text-xs text-slate-400">R$</span>
                       <input
@@ -1427,17 +1762,39 @@ export default function App() {
                         className="w-full bg-slate-50 border border-slate-200 rounded-lg py-1 pl-6 pr-1 text-xs text-center font-bold focus:bg-white focus:outline-hidden"
                       />
                     </div>
+                    <div className="flex gap-1 pt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setSitePrice(1500)}
+                        className={`w-full text-[9px] font-bold py-0.5 rounded border transition-all cursor-pointer ${
+                          sitePrice === 1500 ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        1.500
+                      </button>
+                    </div>
                   </div>
-                  <div>
-                    <span className="block text-[10px] text-slate-500 font-semibold mb-0.5">Combo</span>
+                  <div className="space-y-1">
+                    <span className="block text-[10px] text-slate-500 font-semibold">Combo</span>
                     <div className="relative">
                       <span className="absolute left-2 top-1.5 text-xs text-slate-400">R$</span>
                       <input
                         type="number"
                         value={comboPrice}
                         onChange={(e) => setComboPrice(Number(e.target.value))}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-lg py-1 pl-6 pr-1 text-xs text-center font-bold focus:bg-white focus:outline-hidden"
+                        className="w-full bg-emerald-50 border border-emerald-300 text-emerald-900 rounded-lg py-1 pl-6 pr-1 text-xs text-center font-bold focus:bg-white focus:outline-hidden"
                       />
+                    </div>
+                    <div className="flex gap-1 pt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setComboPrice(1300)}
+                        className={`w-full text-[9px] font-bold py-0.5 rounded border transition-all cursor-pointer ${
+                          comboPrice === 1300 ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        1.300
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -1451,17 +1808,69 @@ export default function App() {
               {/* Opportunities List Container */}
               <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
                 {(() => {
-                  const activeNicheFilter = (customNiche.trim() ? customNiche : niche).trim().toLowerCase();
-                  const activeCityFilter = city.trim().toLowerCase();
+                  const normalizeFilterText = (s: string) =>
+                    (s || '')
+                      .toLowerCase()
+                      .normalize('NFD')
+                      .replace(/[\u0300-\u036f]/g, '')
+                      .replace(/[-_.,/]/g, ' ')
+                      .replace(/\s+/g, ' ')
+                      .trim();
+
+                  const rawCityInput = normalizeFilterText(city);
+                  const cleanCityFilter = rawCityInput
+                    .replace(/\b(sp|rj|mg|pr|sc|rs|ba|go|df|es|ce|pe|am|pa|mt|ms|rn|pb|al|se|pi|to|ro|ac|ap|rr)\b/g, '')
+                    .trim();
+
+                  const rawNicheInput = normalizeFilterText(customNiche.trim() ? customNiche : niche);
+                  const cleanNicheFilter = rawNicheInput
+                    .replace(/\b(em|de|da|do|na|no|para)\b/g, ' ')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+
+                  const NICHE_SYNONYMS: Record<string, string[]> = {
+                    dentista: ['dentist', 'odonto', 'dente', 'dental', 'sorriso', 'ortodont', 'protese', 'implant', 'clinica'],
+                    odonto: ['dentist', 'odonto', 'dente', 'dental', 'sorriso', 'ortodont', 'protese', 'implant'],
+                    mecanica: ['mecanic', 'oficina', 'auto', 'carro', 'veiculo', 'funilar', 'troca de oleo', 'motor', 'pneu'],
+                    restaurante: ['restauran', 'pizza', 'pizzaria', 'hamburguer', 'lanche', 'bar', 'comida', 'gastronom', 'bistro', 'cafe'],
+                    beleza: ['salao', 'beleza', 'cabelo', 'cabeleireir', 'barbearia', 'estetic', 'unha', 'manicure', 'spa']
+                  };
 
                   const displayedLeads = leads.filter(lead => {
+                    // Leads retornados na busca mais recente sempre são exibidos
+                    if (lastSearchLeadIds.includes(lead.id)) return true;
                     if (!filterOnlySearched) return true;
                     
-                    const leadCity = (lead.city || '').trim().toLowerCase();
-                    const cityMatch = !activeCityFilter || leadCity.includes(activeCityFilter) || activeCityFilter.includes(leadCity);
+                    const leadCityClean = normalizeFilterText(lead.city || '')
+                      .replace(/\b(sp|rj|mg|pr|sc|rs|ba|go|df|es|ce|pe|am|pa|mt|ms|rn|pb|al|se|pi|to|ro|ac|ap|rr)\b/g, '')
+                      .trim();
+                    const leadNicheClean = normalizeFilterText(lead.niche || '');
+                    const leadNameClean = normalizeFilterText(lead.name || '');
 
-                    const leadNiche = (lead.niche || '').trim().toLowerCase();
-                    const nicheMatch = !activeNicheFilter || leadNiche.includes(activeNicheFilter) || activeNicheFilter.includes(leadNiche);
+                    // Correspondência de Cidade
+                    const cityMatch = !cleanCityFilter || 
+                      leadCityClean.includes(cleanCityFilter) || 
+                      cleanCityFilter.includes(leadCityClean) ||
+                      cleanCityFilter.split(' ').some(word => word.length >= 3 && leadCityClean.includes(word));
+
+                    // Correspondência de Nicho com Sinônimos Semânticos
+                    let nicheMatch = !cleanNicheFilter || 
+                      leadNicheClean.includes(cleanNicheFilter) || 
+                      cleanNicheFilter.includes(leadNicheClean) ||
+                      leadNameClean.includes(cleanNicheFilter);
+
+                    if (!nicheMatch) {
+                      for (const [key, keywords] of Object.entries(NICHE_SYNONYMS)) {
+                        const filterMatchesGroup = cleanNicheFilter.includes(key) || keywords.some(k => cleanNicheFilter.includes(k));
+                        if (filterMatchesGroup) {
+                          const leadMatchesGroup = keywords.some(k => leadNicheClean.includes(k) || leadNameClean.includes(k));
+                          if (leadMatchesGroup) {
+                            nicheMatch = true;
+                            break;
+                          }
+                        }
+                      }
+                    }
 
                     return cityMatch && nicheMatch;
                   });
@@ -1490,7 +1899,7 @@ export default function App() {
                                 : 'text-slate-500 hover:text-slate-800'
                             }`}
                           >
-                            Filtrado
+                            Filtrado ({displayedLeads.length})
                           </button>
                           <button
                             onClick={() => setFilterOnlySearched(false)}
@@ -1507,10 +1916,25 @@ export default function App() {
 
                       <div className="divide-y divide-slate-100 max-h-[360px] overflow-y-auto">
                         {displayedLeads.length === 0 ? (
-                          <div className="text-center py-12 px-4">
-                            <Search className="h-10 w-10 text-slate-300 mx-auto mb-3" />
-                            <p className="text-slate-500 font-medium text-sm">Nenhum lead encontrado neste filtro.</p>
-                            <p className="text-slate-400 text-xs mt-1">Clique em "Buscar Oportunidades" ao lado para varrer esta cidade, ou altere o filtro para "Todos" acima.</p>
+                          <div className="text-center py-10 px-4 space-y-3">
+                            <Search className="h-10 w-10 text-slate-300 mx-auto" />
+                            <div>
+                              <p className="text-slate-700 font-bold text-sm">Nenhum lead com o filtro restrito atual.</p>
+                              <p className="text-slate-400 text-xs mt-0.5">
+                                {leads.length > 0 
+                                  ? `Existem ${leads.length} empresas cadastradas no sistema que você pode visualizar.` 
+                                  : 'Clique em "Buscar Oportunidades" ao lado para varrer estabelecimentos reais no Google.'}
+                              </p>
+                            </div>
+                            {leads.length > 0 && (
+                              <button
+                                onClick={() => setFilterOnlySearched(false)}
+                                className="inline-flex items-center gap-1.5 bg-slate-900 hover:bg-black text-white text-xs font-bold px-4 py-2 rounded-xl transition-all cursor-pointer"
+                              >
+                                <Eye className="h-3.5 w-3.5 text-cyan-400" />
+                                Mostrar Todos os {leads.length} Leads
+                              </button>
+                            )}
                           </div>
                         ) : (
                           displayedLeads.map((lead) => {
@@ -1605,12 +2029,16 @@ export default function App() {
                     </div>
                     <div className="flex gap-2">
                       <button
-                        onClick={() => generateWebsiteTemplate(selectedLead)}
-                        className="bg-slate-950 hover:bg-slate-900 text-white text-xs font-black py-2.5 px-4 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer uppercase tracking-wider"
+                        onClick={() => requireMasterAccess('site_preview', () => generateWebsiteTemplate(selectedLead))}
+                        className="bg-slate-950 hover:bg-slate-900 text-white text-xs font-black py-2.5 px-4 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer uppercase tracking-wider shadow-sm"
                         id="btn-generate-site-model"
+                        title={!isMasterAuthenticated ? "Requer autenticação Master" : "Gerar site demonstrativo para este lead"}
                       >
                         <Globe className="h-3.5 w-3.5 text-cyan-400" />
-                        Criar Site Modelo
+                        <span>Criar Site Modelo</span>
+                        {!isMasterAuthenticated && (
+                          <Lock className="h-3 w-3 text-amber-400 ml-0.5" />
+                        )}
                       </button>
                       <button
                         onClick={() => {
@@ -1965,11 +2393,17 @@ export default function App() {
                           Contatar
                         </button>
                         <button
-                          onClick={() => { setSelectedLead(lead); generateWebsiteTemplate(lead); }}
-                          className="px-2 py-1 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-md text-[10px]"
-                          title="Gerar Site de Modelo"
+                          onClick={() => {
+                            requireMasterAccess('site_preview', () => {
+                              setSelectedLead(lead);
+                              generateWebsiteTemplate(lead);
+                            });
+                          }}
+                          className="px-2 py-1 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-md text-[10px] flex items-center gap-0.5"
+                          title="Gerar Site de Modelo (Requer Master)"
                         >
-                          Site
+                          <span>Site</span>
+                          {!isMasterAuthenticated && <Lock className="h-2 w-2 text-amber-500" />}
                         </button>
                       </div>
                     </div>
@@ -2104,10 +2538,16 @@ export default function App() {
                       )}
                       <div className="flex gap-1 pt-1.5 border-t border-slate-100">
                         <button
-                          onClick={() => { setSelectedLead(lead); generateWebsiteTemplate(lead); }}
-                          className="flex-1 py-1 text-center bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-md text-[10px]"
+                          onClick={() => {
+                            requireMasterAccess('site_preview', () => {
+                              setSelectedLead(lead);
+                              generateWebsiteTemplate(lead);
+                            });
+                          }}
+                          className="flex-1 py-1 text-center bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-md text-[10px] flex items-center justify-center gap-1"
                         >
-                          Configurar Site
+                          <span>Configurar Site</span>
+                          {!isMasterAuthenticated && <Lock className="h-2.5 w-2.5 text-amber-400" />}
                         </button>
                       </div>
                     </div>
@@ -2148,353 +2588,804 @@ export default function App() {
 
         {/* TAB 3: AI WEBSITE MODEL GENERATOR */}
         {activeTab === 'site_preview' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            
-            {/* Template parameters live-editor panel */}
-            <div className="lg:col-span-4 bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
-              <div className="pb-3 border-b border-slate-100">
-                <h2 className="text-base font-bold text-slate-900 flex items-center gap-1.5">
-                  <Globe className="h-4.5 w-4.5 text-blue-600" />
-                  Editor de Site de Modelo
-                </h2>
-                <p className="text-xs text-slate-500 mt-1">
-                  Customize a Landing Page criada pela Inteligência Artificial para encantar a empresa.
-                </p>
-              </div>
+          <div>
+            {!isMasterAuthenticated ? (
+              <div className="max-w-md mx-auto my-12 bg-white rounded-3xl border border-slate-200/80 p-8 shadow-xl text-center space-y-6">
+                <div className="mx-auto w-16 h-16 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600 shadow-inner">
+                  <Lock className="h-8 w-8" />
+                </div>
+                <div>
+                  <span className="inline-block text-[10px] font-extrabold tracking-widest uppercase bg-amber-100 text-amber-900 px-3 py-1 rounded-full mb-2">
+                    Acesso Restrito Master
+                  </span>
+                  <h2 className="text-xl font-black text-slate-900">
+                    Site Demonstrativo Protegido
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+                    A criação e simulação de sites de modelo é uma ferramenta estratégica exclusiva para operadores autorizados. Faça login com a senha Master para desbloquear.
+                  </p>
+                </div>
 
-              {siteTemplate ? (
-                <div className="space-y-4">
+                <form onSubmit={handleMasterLogin} className="space-y-4 text-left">
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Título Principal (Hero)</label>
-                    <textarea
-                      value={siteTemplate.hero.title}
-                      onChange={(e) => setSiteTemplate({
-                        ...siteTemplate,
-                        hero: { ...siteTemplate.hero, title: e.target.value }
-                      })}
-                      rows={3}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs font-medium focus:bg-white focus:outline-hidden transition-all"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Subtítulo explicativo</label>
-                    <textarea
-                      value={siteTemplate.hero.subtitle}
-                      onChange={(e) => setSiteTemplate({
-                        ...siteTemplate,
-                        hero: { ...siteTemplate.hero, subtitle: e.target.value }
-                      })}
-                      rows={3}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs font-medium focus:bg-white focus:outline-hidden transition-all"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Chamada no Botão (CTA)</label>
-                    <input
-                      type="text"
-                      value={siteTemplate.hero.ctaText}
-                      onChange={(e) => setSiteTemplate({
-                        ...siteTemplate,
-                        hero: { ...siteTemplate.hero, ctaText: e.target.value }
-                      })}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs font-medium focus:bg-white focus:outline-hidden transition-all"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1.5">Paleta de Cores Hex</label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <span className="block text-[10px] text-slate-500 font-semibold mb-0.5">Primária</span>
-                        <div className="flex gap-1.5 items-center bg-slate-50 border border-slate-200 rounded-lg p-1">
-                          <input
-                            type="color"
-                            value={siteTemplate.colors.primary}
-                            onChange={(e) => setSiteTemplate({
-                              ...siteTemplate,
-                              colors: { ...siteTemplate.colors, primary: e.target.value }
-                            })}
-                            className="w-6 h-6 border-0 rounded-md cursor-pointer"
-                          />
-                          <span className="text-[10px] font-mono font-bold text-slate-600">{siteTemplate.colors.primary}</span>
-                        </div>
-                      </div>
-
-                      <div>
-                        <span className="block text-[10px] text-slate-500 font-semibold mb-0.5">Botões / CTA</span>
-                        <div className="flex gap-1.5 items-center bg-slate-50 border border-slate-200 rounded-lg p-1">
-                          <input
-                            type="color"
-                            value={siteTemplate.colors.accent}
-                            onChange={(e) => setSiteTemplate({
-                              ...siteTemplate,
-                              colors: { ...siteTemplate.colors, accent: e.target.value }
-                            })}
-                            className="w-6 h-6 border-0 rounded-md cursor-pointer"
-                          />
-                          <span className="text-[10px] font-mono font-bold text-slate-600">{siteTemplate.colors.accent}</span>
-                        </div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs font-bold text-slate-700">Usuário Master</label>
+                      <div className="flex gap-1">
+                        <button
+                          type="button"
+                          onClick={() => fillMasterCredentials('env')}
+                          className="text-[9px] px-1.5 py-0.5 bg-amber-50 text-amber-800 border border-amber-200 rounded font-bold hover:bg-amber-100 transition cursor-pointer"
+                          title="Preencher com Mysis@26"
+                        >
+                          Mysis@26
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => fillMasterCredentials('default')}
+                          className="text-[9px] px-1.5 py-0.5 bg-slate-100 text-slate-700 border border-slate-200 rounded font-bold hover:bg-slate-200 transition cursor-pointer"
+                          title="Preencher com master"
+                        >
+                          master
+                        </button>
                       </div>
                     </div>
+                    <input
+                      type="text"
+                      value={masterUserInput}
+                      onChange={(e) => setMasterUserInput(e.target.value)}
+                      placeholder="Mysis@26 ou master"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-semibold focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Senha Master</label>
+                    <input
+                      type="password"
+                      value={masterPasswordInput}
+                      onChange={(e) => setMasterPasswordInput(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-semibold focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
+                    />
+                  </div>
+
+                  {masterError && (
+                    <div className="p-3 bg-red-50 border border-red-200 rounded-xl flex items-center gap-2 text-xs font-bold text-red-700">
+                      <AlertCircle className="h-4 w-4 shrink-0 text-red-500" />
+                      <span>{masterError}</span>
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={masterIsLoading}
+                    className="w-full py-2.5 bg-slate-900 hover:bg-black text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    {masterIsLoading ? (
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Unlock className="h-3.5 w-3.5 text-amber-400" />
+                    )}
+                    <span>Desbloquear Site Demonstrativo</span>
+                  </button>
+                </form>
+
+                <p className="text-[11px] text-slate-400 font-medium">
+                  Operador Master ALEF Automações • Aceita: Mysis@26 / Myadm@26 ou master / master@2026
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                
+                {/* Template parameters live-editor panel */}
+                <div className="lg:col-span-4 bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
+                  <div className="pb-3 border-b border-slate-100 flex items-center justify-between">
+                    <div>
+                      <h2 className="text-base font-bold text-slate-900 flex items-center gap-1.5">
+                        <Globe className="h-4.5 w-4.5 text-blue-600" />
+                        Editor Imersivo &amp; Estratégico
+                      </h2>
+                      <p className="text-xs text-slate-500 mt-1">
+                        Landing Page de altíssima conversão com simulador e prova social.
+                      </p>
+                    </div>
+                    <span className="text-[9px] bg-emerald-50 text-emerald-700 border border-emerald-200 font-extrabold px-2 py-0.5 rounded-full shrink-0">
+                      Master Ativo
+                    </span>
                   </div>
 
                   {selectedLead && (
-                    <div className="pt-4 border-t border-slate-100 bg-blue-50/50 p-3.5 rounded-xl border border-blue-100">
-                      <h4 className="text-xs font-extrabold text-blue-900">Script de Apresentação</h4>
-                      <p className="text-[11px] text-blue-800 mt-1">"Eu tomei a liberdade de criar esse site demonstrativo personalizado para mostrar o impacto que um design profissional tem no posicionamento de vocês do Google Meu Negócio de {selectedLead.city}..."</p>
+                    <div className="flex items-center justify-between bg-slate-50 p-3 rounded-xl border border-slate-200/80">
+                      <div className="truncate">
+                        <span className="block text-[10px] text-slate-400 uppercase font-bold tracking-wider">Lead Ativo</span>
+                        <h4 className="text-xs font-black text-slate-900 truncate">{selectedLead.name}</h4>
+                        <span className="text-[10px] text-slate-500">{selectedLead.niche} • {selectedLead.city}</span>
+                      </div>
+                      <button
+                        onClick={() => generateWebsiteTemplate(selectedLead)}
+                        disabled={isGeneratingSite}
+                        className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 shrink-0 transition-colors shadow-2xs cursor-pointer disabled:opacity-50"
+                        title="Regenerar modelo com IA imersiva"
+                      >
+                        <RefreshCw className={`h-3 w-3 ${isGeneratingSite ? 'animate-spin' : ''}`} />
+                        <span>Regenerar</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Visual Atmosphere Switcher */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5">Atmosfera Visual do Site</label>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setSimulatorTheme('clean')}
+                        className={`px-2 py-1.5 text-xs font-bold rounded-lg border text-center transition-all cursor-pointer ${
+                          simulatorTheme === 'clean'
+                            ? 'bg-blue-50 border-blue-400 text-blue-700 shadow-xs'
+                            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        Clean Corp
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSimulatorTheme('dark')}
+                        className={`px-2 py-1.5 text-xs font-bold rounded-lg border text-center transition-all cursor-pointer ${
+                          simulatorTheme === 'dark'
+                            ? 'bg-slate-900 border-slate-800 text-white shadow-xs'
+                            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        Dark Cyber
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSimulatorTheme('vibrant')}
+                        className={`px-2 py-1.5 text-xs font-bold rounded-lg border text-center transition-all cursor-pointer ${
+                          simulatorTheme === 'vibrant'
+                            ? 'bg-purple-50 border-purple-400 text-purple-700 shadow-xs'
+                            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        Vibrante
+                      </button>
+                    </div>
+                  </div>
+
+                  {siteTemplate ? (
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">Título Principal (Hero)</label>
+                        <textarea
+                          value={siteTemplate.hero.title}
+                          onChange={(e) => setSiteTemplate({
+                            ...siteTemplate,
+                            hero: { ...siteTemplate.hero, title: e.target.value }
+                          })}
+                          rows={2}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs font-medium focus:bg-white focus:outline-hidden transition-all"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">Subtítulo Estratégico</label>
+                        <textarea
+                          value={siteTemplate.hero.subtitle}
+                          onChange={(e) => setSiteTemplate({
+                            ...siteTemplate,
+                            hero: { ...siteTemplate.hero, subtitle: e.target.value }
+                          })}
+                          rows={2}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs font-medium focus:bg-white focus:outline-hidden transition-all"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">Texto do Botão CTA (WhatsApp)</label>
+                        <input
+                          type="text"
+                          value={siteTemplate.hero.ctaText}
+                          onChange={(e) => setSiteTemplate({
+                            ...siteTemplate,
+                            hero: { ...siteTemplate.hero, ctaText: e.target.value }
+                          })}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs font-medium focus:bg-white focus:outline-hidden transition-all"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1.5">Paleta de Cores</label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <span className="block text-[10px] text-slate-500 font-semibold mb-0.5">Cor Principal</span>
+                            <div className="flex gap-1.5 items-center bg-slate-50 border border-slate-200 rounded-lg p-1">
+                              <input
+                                type="color"
+                                value={siteTemplate.colors.primary}
+                                onChange={(e) => setSiteTemplate({
+                                  ...siteTemplate,
+                                  colors: { ...siteTemplate.colors, primary: e.target.value }
+                                })}
+                                className="w-6 h-6 border-0 rounded-md cursor-pointer"
+                              />
+                              <span className="text-[10px] font-mono font-bold text-slate-600">{siteTemplate.colors.primary}</span>
+                            </div>
+                          </div>
+
+                          <div>
+                            <span className="block text-[10px] text-slate-500 font-semibold mb-0.5">Botões de Conversão</span>
+                            <div className="flex gap-1.5 items-center bg-slate-50 border border-slate-200 rounded-lg p-1">
+                              <input
+                                type="color"
+                                value={siteTemplate.colors.accent}
+                                onChange={(e) => setSiteTemplate({
+                                  ...siteTemplate,
+                                  colors: { ...siteTemplate.colors, accent: e.target.value }
+                                })}
+                                className="w-6 h-6 border-0 rounded-md cursor-pointer"
+                              />
+                              <span className="text-[10px] font-mono font-bold text-slate-600">{siteTemplate.colors.accent}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Pitch Script Hint */}
+                      {selectedLead && (
+                        <div className="pt-3 border-t border-slate-100 bg-blue-50/60 p-3.5 rounded-xl border border-blue-100 text-xs">
+                          <h4 className="font-extrabold text-blue-900 flex items-center gap-1">
+                            <Sparkles className="h-3 w-3 text-blue-600" />
+                            Gatilho de Venda para {selectedLead.name}
+                          </h4>
+                          <p className="text-[11px] text-blue-800 mt-1 leading-relaxed">
+                            "Mostre este simulador no seu tablet ou celular. O cliente vê os botões funcionando com WhatsApp direto, o cálculo de orçamentos e as avaliações 5 estrelas do Google."
+                          </p>
+                        </div>
+                      )}
+
+                    </div>
+                  ) : (
+                    <div className="text-center py-10 px-4 space-y-3">
+                      <Globe className="h-10 w-10 text-slate-300 mx-auto" />
+                      <p className="text-slate-600 font-bold text-xs">Nenhum site carregado</p>
+                      <p className="text-slate-400 text-[11px]">Selecione um lead na aba Prospecção e clique em "Criar Site Modelo".</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Browser Simulator Canvas */}
+                <div className="lg:col-span-8 space-y-4">
+                  
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <div className="flex bg-slate-100 p-0.5 rounded-xl border border-slate-200">
+                        <button
+                          onClick={() => setDeviceView('desktop')}
+                          className={`flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                            deviceView === 'desktop' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-700'
+                          }`}
+                        >
+                          <Laptop className="h-3.5 w-3.5" />
+                          Computador
+                        </button>
+                        <button
+                          onClick={() => setDeviceView('mobile')}
+                          className={`flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                            deviceView === 'mobile' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-700'
+                          }`}
+                        >
+                          <Smartphone className="h-3.5 w-3.5" />
+                          Celular (Mobile)
+                        </button>
+                      </div>
+
+                      <span className="text-[10px] text-slate-400 font-bold hidden sm:inline">
+                        Modo: {simulatorTheme === 'dark' ? 'Cyber Dark' : simulatorTheme === 'vibrant' ? 'Vibrante' : 'Clean'}
+                      </span>
+                    </div>
+                    
+                    {selectedLead && (
+                      <span className="text-xs text-slate-600 font-bold bg-white px-3 py-1.5 border border-slate-200 rounded-xl shadow-2xs">
+                        Empresa: <strong className="font-extrabold text-slate-900">{selectedLead.name}</strong>
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Simulator view frame */}
+                  {isGeneratingSite ? (
+                    <div className="bg-white border border-slate-200 rounded-2xl h-[620px] shadow-sm flex flex-col items-center justify-center gap-4 text-slate-500 p-8">
+                      <div className="relative flex items-center justify-center">
+                        <div className="animate-ping absolute inline-flex h-10 w-10 rounded-full bg-blue-400 opacity-75"></div>
+                        <div className="relative rounded-full h-10 w-10 bg-blue-600 flex items-center justify-center text-white font-bold">
+                          <Sparkles className="h-5 w-5" />
+                        </div>
+                      </div>
+                      <p className="font-black text-slate-800 text-base">Gerando Landing Page Imersiva com IA...</p>
+                      <p className="text-xs text-slate-400 text-center max-w-sm leading-relaxed">
+                        Construindo simulador de orçamento, prova social verificada com nota 4.9★ no Google, métricas de garantia e gatilhos mentais do segmento de {selectedLead?.niche || 'atuação'}.
+                      </p>
+                    </div>
+                  ) : siteTemplate ? (
+                    <div className="flex justify-center bg-slate-200/60 p-4 sm:p-6 rounded-2xl border border-slate-300/50 shadow-inner overflow-hidden">
+                      
+                      {/* Outer Frame Wrapper */}
+                      <div className={`bg-white border border-slate-300 rounded-2xl shadow-2xl transition-all duration-300 ${
+                        deviceView === 'mobile' ? 'w-[375px] h-[640px]' : 'w-full h-[640px]'
+                      } flex flex-col relative`}>
+                        
+                        {/* Simulator top browser bar */}
+                        <div className="bg-slate-100 border-b border-slate-200 px-4 py-2 flex items-center gap-2 rounded-t-2xl shrink-0">
+                          <div className="flex gap-1 shrink-0">
+                            <span className="w-2.5 h-2.5 rounded-full bg-red-400" />
+                            <span className="w-2.5 h-2.5 rounded-full bg-yellow-400" />
+                            <span className="w-2.5 h-2.5 rounded-full bg-green-400" />
+                          </div>
+                          <div className="bg-white border border-slate-200 rounded-md py-0.5 px-3.5 text-[10px] text-slate-500 font-mono font-bold flex-1 truncate text-center flex items-center justify-center gap-1.5 shadow-2xs">
+                            <Shield className="h-2.5 w-2.5 text-emerald-500" />
+                            <span>https://www.{selectedLead ? selectedLead.name.toLowerCase().replace(/[^a-z0-9]/g, '') : 'site-demonstrativo'}.com.br</span>
+                          </div>
+                        </div>
+
+                        {/* Simulated website body content with theme styles */}
+                        <div 
+                          className="flex-1 overflow-y-auto scroll-smooth relative" 
+                          onScroll={(e) => setSimulatedScroll(e.currentTarget.scrollTop)}
+                          style={{
+                            backgroundColor: simulatorTheme === 'dark' ? '#090d16' : siteTemplate.colors.bg || '#ffffff',
+                            color: simulatorTheme === 'dark' ? '#f1f5f9' : siteTemplate.colors.text || '#0f172a'
+                          }}
+                        >
+                          
+                          {/* Navigation Header */}
+                          <header className={`px-4 py-3 border-b flex items-center justify-between sticky top-0 backdrop-blur-md z-20 shadow-xs ${
+                            simulatorTheme === 'dark' 
+                              ? 'bg-slate-900/90 border-slate-800 text-white' 
+                              : 'bg-white/95 border-slate-100 text-slate-900'
+                          }`}>
+                            <div className="flex items-center gap-2">
+                              <span className="font-black text-xs uppercase tracking-wider" style={{ color: siteTemplate.colors.primary }}>
+                                {siteTemplate.brand?.name || selectedLead?.name || 'Logotipo'}
+                              </span>
+                              <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                Aberto Hoje
+                              </span>
+                            </div>
+                            
+                            <a
+                              href={selectedLead ? getWhatsAppLink(selectedLead, `Olá! Vi o site de ${selectedLead.name} e gostaria de atendimento.`) : '#'}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-3 py-1 rounded-full text-[10px] font-bold text-white shadow-xs flex items-center gap-1 cursor-pointer"
+                              style={{ backgroundColor: siteTemplate.colors.accent || '#10b981' }}
+                            >
+                              <MessageSquare className="h-2.5 w-2.5" />
+                              <span>WhatsApp</span>
+                            </a>
+                          </header>
+
+                          {/* Cinematic Hero Banner with dynamic parallax zoom */}
+                          <div className="relative h-56 md:h-64 w-full overflow-hidden shrink-0 flex items-center justify-center bg-slate-950">
+                            <div 
+                              className="absolute inset-0 bg-cover bg-center transition-transform duration-75 ease-out opacity-80"
+                              style={{
+                                backgroundImage: `url('https://images.unsplash.com/photo-1521737604893-d14cc237f11d?auto=format&fit=crop&w=1200&q=80')`,
+                                transform: `scale(${1 + (simulatedScroll / 450)}) translateY(${simulatedScroll * 0.12}px)`,
+                                filter: `blur(${Math.min(3, simulatedScroll / 120)}px)`
+                              }}
+                            />
+                            <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/60 to-slate-950/20" />
+                            
+                            {/* Floating title with 3D parallax */}
+                            <div 
+                              className="relative z-10 text-center px-4 space-y-2 transition-all duration-75 ease-out"
+                              style={{
+                                transform: `translateY(${-simulatedScroll * 0.08}px)`,
+                                opacity: Math.max(0, 1 - (simulatedScroll / 180))
+                              }}
+                            >
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 text-white text-[9px] uppercase font-black tracking-widest border border-white/20 backdrop-blur-md">
+                                <Sparkles className="h-3 w-3 text-amber-400" />
+                                {siteTemplate.brand?.badge || 'Excelência Comprovada 2026'}
+                              </span>
+                              <h2 className="text-lg md:text-xl font-black text-white tracking-tight leading-tight drop-shadow-md">
+                                {siteTemplate.brand?.name || selectedLead?.name || 'Empresa Referência'}
+                              </h2>
+                              <p className="text-[11px] text-slate-300 font-medium max-w-xs mx-auto drop-shadow-sm">
+                                {siteTemplate.brand?.slogan || `Referência em qualidade e agilidade em ${selectedLead?.city || 'sua cidade'}`}
+                              </p>
+                            </div>
+
+                            {/* Dynamic scroll indicator */}
+                            <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 flex flex-col items-center gap-0.5 animate-bounce">
+                              <span className="text-[8px] text-white/60 font-bold uppercase tracking-widest">Role para baixo</span>
+                              <ChevronDown className="h-3 w-3 text-white/70" />
+                            </div>
+                          </div>
+
+                          {/* Hero Main Content */}
+                          <section className={`px-5 py-8 md:py-10 text-center space-y-4 border-b ${
+                            simulatorTheme === 'dark' ? 'border-slate-800 bg-slate-950/40' : 'border-slate-100 bg-linear-to-b from-blue-50/30 to-transparent'
+                          }`}>
+                            {/* Google 4.9 Rating Badge */}
+                            <div className="inline-flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 px-3 py-1 rounded-full text-amber-500 text-[10px] font-black uppercase tracking-wider">
+                              <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+                              <span>4.9 no Google Meu Negócio • Empresa Verificada</span>
+                            </div>
+
+                            <h1 className="text-xl md:text-2xl font-black leading-tight tracking-tight">
+                              {siteTemplate.hero.title}
+                            </h1>
+                            <p className={`text-xs md:text-sm max-w-lg mx-auto leading-relaxed ${
+                              simulatorTheme === 'dark' ? 'text-slate-300' : 'text-slate-600'
+                            }`}>
+                              {siteTemplate.hero.subtitle}
+                            </p>
+
+                            {/* Dual CTAs */}
+                            <div className="flex flex-col sm:flex-row items-center justify-center gap-2.5 pt-2">
+                              <a
+                                href={selectedLead ? getWhatsAppLink(selectedLead, `Olá! Acessei o site de ${selectedLead.name} e gostaria de um orçamento imediato.`) : '#'}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="w-full sm:w-auto px-6 py-2.5 text-xs font-black rounded-full shadow-md hover:opacity-90 active:scale-95 transition-all text-white flex items-center justify-center gap-2 uppercase tracking-wider cursor-pointer"
+                                style={{ backgroundColor: siteTemplate.colors.accent || '#10b981' }}
+                              >
+                                <MessageSquare className="h-3.5 w-3.5" />
+                                <span>{siteTemplate.hero.ctaText || 'Falar no WhatsApp'}</span>
+                              </a>
+                            </div>
+
+                            {/* Trust Metrics Bar */}
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-6 max-w-xl mx-auto">
+                              {(siteTemplate.hero.trustMetrics || [
+                                { value: "4.9 ★", label: "Google Meu Negócio" },
+                                { value: "1.200+", label: "Atendimentos" },
+                                { value: "30 min", label: "Resposta Rápida" },
+                                { value: "100%", label: "Garantia Formal" }
+                              ]).map((metric, mIdx) => (
+                                <div 
+                                  key={mIdx} 
+                                  className={`p-2.5 rounded-xl border text-center ${
+                                    simulatorTheme === 'dark' 
+                                      ? 'bg-slate-900 border-slate-800' 
+                                      : 'bg-white border-slate-200/80 shadow-2xs'
+                                  }`}
+                                >
+                                  <span className="block text-sm font-black" style={{ color: siteTemplate.colors.primary }}>
+                                    {metric.value}
+                                  </span>
+                                  <span className={`text-[9px] uppercase font-bold ${
+                                    simulatorTheme === 'dark' ? 'text-slate-400' : 'text-slate-500'
+                                  }`}>
+                                    {metric.label}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </section>
+
+                          {/* INTERACTIVE INSTANT QUOTE CALCULATOR */}
+                          <section className={`px-5 py-8 border-b ${
+                            simulatorTheme === 'dark' ? 'border-slate-800 bg-slate-900/30' : 'border-slate-100 bg-slate-50/60'
+                          }`}>
+                            <div className="max-w-md mx-auto space-y-4">
+                              <div className="text-center">
+                                <span className="inline-block text-[9px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-200 mb-1">
+                                  Simulador Interativo
+                                </span>
+                                <h3 className="text-sm font-black text-slate-900">
+                                  {siteTemplate.interactiveQuote?.title || "Simulador de Atendimento Expresso"}
+                                </h3>
+                                <p className={`text-[11px] mt-0.5 ${simulatorTheme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>
+                                  {siteTemplate.interactiveQuote?.subtitle || "Clique no serviço para obter a estimativa e iniciar a conversa:"}
+                                </p>
+                              </div>
+
+                              <div className="space-y-2">
+                                {(siteTemplate.interactiveQuote?.options || [
+                                  { name: "Atendimento Prioritário Imediato", estimatedPrice: "Orçamento Especial", highlight: "Mais Procurado" },
+                                  { name: "Serviço Completo com Garantia Total", estimatedPrice: "Condições Facilitadas", highlight: "Melhor Avaliado" },
+                                  { name: "Consultoria e Diagnóstico Especializado", estimatedPrice: "Sob Demanda", highlight: "Sem Letras Miúdas" }
+                                ]).map((opt, oIdx) => {
+                                  const isSelected = selectedQuoteService === opt.name;
+                                  return (
+                                    <div
+                                      key={oIdx}
+                                      onClick={() => setSelectedQuoteService(opt.name)}
+                                      className={`p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                                        isSelected 
+                                          ? 'border-blue-500 bg-blue-50/80 shadow-xs' 
+                                          : simulatorTheme === 'dark' 
+                                            ? 'bg-slate-900 border-slate-800 hover:border-slate-700' 
+                                            : 'bg-white border-slate-200 hover:border-slate-300'
+                                      }`}
+                                    >
+                                      <div>
+                                        <div className="flex items-center gap-1.5">
+                                          <span className="text-xs font-bold">{opt.name}</span>
+                                          <span className="text-[8px] font-black uppercase px-1.5 py-0.2 rounded bg-amber-100 text-amber-800">
+                                            {opt.highlight}
+                                          </span>
+                                        </div>
+                                        <span className="text-[10px] text-emerald-600 font-extrabold">{opt.estimatedPrice}</span>
+                                      </div>
+                                      <div className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 ${
+                                        isSelected ? 'bg-blue-600 border-blue-600 text-white' : 'border-slate-300'
+                                      }`}>
+                                        {isSelected && <Check className="h-3 w-3" />}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+
+                              {selectedQuoteService && (
+                                <a
+                                  href={selectedLead ? getWhatsAppLink(selectedLead, `Olá! Gostaria de agendar o serviço: ${selectedQuoteService}.`) : '#'}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="w-full py-2.5 px-4 rounded-xl text-xs font-black text-white text-center flex items-center justify-center gap-2 shadow-md hover:opacity-90 transition-all cursor-pointer"
+                                  style={{ backgroundColor: siteTemplate.colors.accent || '#10b981' }}
+                                >
+                                  <MessageSquare className="h-3.5 w-3.5" />
+                                  <span>Garantir {selectedQuoteService} no WhatsApp</span>
+                                </a>
+                              )}
+                            </div>
+                          </section>
+
+                          {/* Services / Benefits Section */}
+                          <section className="px-5 py-8 space-y-5">
+                            <div className="text-center">
+                              <h2 className="text-xs font-bold uppercase tracking-widest text-slate-400">Nossos Serviços</h2>
+                              <p className="text-sm font-black mt-1">Especialidades e Padrão de Qualidade</p>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                              {siteTemplate.services.map((svc, sIdx) => (
+                                <div 
+                                  key={sIdx} 
+                                  className={`p-4 rounded-xl border space-y-2 ${
+                                    simulatorTheme === 'dark' 
+                                      ? 'bg-slate-900 border-slate-800' 
+                                      : 'bg-white border-slate-200/80 shadow-2xs'
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <div className="w-7 h-7 rounded-lg bg-blue-100 flex items-center justify-center text-blue-700">
+                                      <Award className="h-4 w-4" style={{ color: siteTemplate.colors.primary }} />
+                                    </div>
+                                    {svc.badge && (
+                                      <span className="text-[8px] font-black uppercase px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                                        {svc.badge}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <h3 className="font-bold text-xs">{svc.title}</h3>
+                                  <p className={`text-[11px] leading-relaxed ${
+                                    simulatorTheme === 'dark' ? 'text-slate-400' : 'text-slate-500'
+                                  }`}>
+                                    {svc.description}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          </section>
+
+                          {/* About Us Section */}
+                          <section className={`px-5 py-8 border-y flex flex-col md:flex-row items-center gap-6 ${
+                            simulatorTheme === 'dark' ? 'border-slate-800 bg-slate-950/50' : 'border-slate-100 bg-white/60'
+                          }`}>
+                            <div className="space-y-3 flex-1">
+                              <h2 className="text-sm font-black">{siteTemplate.about.title}</h2>
+                              <p className={`text-xs leading-relaxed ${
+                                simulatorTheme === 'dark' ? 'text-slate-300' : 'text-slate-600'
+                              }`}>
+                                {siteTemplate.about.text}
+                              </p>
+                              {siteTemplate.about.highlights && (
+                                <div className="space-y-1 pt-1">
+                                  {siteTemplate.about.highlights.map((h, hIdx) => (
+                                    <div key={hIdx} className="flex items-center gap-2 text-[11px] font-semibold text-emerald-600">
+                                      <CheckCircle className="h-3 w-3 shrink-0" />
+                                      <span>{h}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </section>
+
+                          {/* Google Reviews Verified Section */}
+                          <section className="px-5 py-8 space-y-4">
+                            <div className="text-center">
+                              <div className="inline-flex items-center gap-1.5 text-xs font-black text-amber-500 mb-1">
+                                <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                                <span>Avaliações Verificadas no Google</span>
+                              </div>
+                              <h3 className="text-sm font-black">Depoimentos Reais de Clientes</h3>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              {siteTemplate.testimonials.map((t, tIdx) => (
+                                <div 
+                                  key={tIdx} 
+                                  className={`p-4 rounded-xl border space-y-2.5 ${
+                                    simulatorTheme === 'dark' 
+                                      ? 'bg-slate-900 border-slate-800' 
+                                      : 'bg-white border-slate-200/80 shadow-2xs'
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                      <div className="w-7 h-7 rounded-full bg-slate-200 flex items-center justify-center text-xs font-black text-slate-700">
+                                        {t.author.charAt(0)}
+                                      </div>
+                                      <div>
+                                        <h4 className="font-bold text-xs">{t.author}</h4>
+                                        <p className="text-[9px] text-slate-400">{t.role}</p>
+                                      </div>
+                                    </div>
+                                    <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
+                                      Verificado
+                                    </span>
+                                  </div>
+                                  <p className={`text-xs italic leading-relaxed ${
+                                    simulatorTheme === 'dark' ? 'text-slate-300' : 'text-slate-600'
+                                  }`}>
+                                    "{t.text}"
+                                  </p>
+                                  <div className="flex items-center justify-between pt-1">
+                                    <div className="flex text-amber-400">
+                                      {[...Array(5)].map((_, i) => (
+                                        <Star key={i} className="h-3 w-3 fill-amber-400 text-amber-400" />
+                                      ))}
+                                    </div>
+                                    <span className="text-[9px] text-slate-400 font-medium">{t.timeAgo || "há 2 dias"}</span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </section>
+
+                          {/* FAQ Interactive Accordion Section */}
+                          <section className={`px-5 py-8 border-t ${
+                            simulatorTheme === 'dark' ? 'border-slate-800 bg-slate-900/40' : 'border-slate-100 bg-slate-50/50'
+                          }`}>
+                            <div className="max-w-md mx-auto space-y-4">
+                              <div className="text-center">
+                                <h3 className="text-sm font-black">Perguntas Frequentes</h3>
+                                <p className="text-[11px] text-slate-400 mt-0.5">Tire suas dúvidas antes de agendar</p>
+                              </div>
+
+                              <div className="space-y-2">
+                                {(siteTemplate.faq || [
+                                  { question: "Como funciona para solicitar um orçamento?", answer: "Você clica no botão do WhatsApp, nos conta sua necessidade e respondemos em poucos minutos com orientações claras." },
+                                  { question: "Possui garantia dos serviços?", answer: "Sim, emitimos certificado de garantia e suporte continuado para todos os atendimentos realizados." },
+                                  { question: "Quais as formas de pagamento?", answer: "Pix, cartões de crédito em até 12x e boleto bancário facilitado." }
+                                ]).map((faqItem, fIdx) => {
+                                  const isOpen = activeFaqIndex === fIdx;
+                                  return (
+                                    <div 
+                                      key={fIdx}
+                                      className={`rounded-xl border overflow-hidden transition-all ${
+                                        simulatorTheme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
+                                      }`}
+                                    >
+                                      <button
+                                        type="button"
+                                        onClick={() => setActiveFaqIndex(isOpen ? null : fIdx)}
+                                        className="w-full p-3 text-left font-bold text-xs flex items-center justify-between gap-2 cursor-pointer"
+                                      >
+                                        <span>{faqItem.question}</span>
+                                        <ChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform ${isOpen ? 'rotate-180 text-blue-600' : 'text-slate-400'}`} />
+                                      </button>
+                                      {isOpen && (
+                                        <div className={`px-3 pb-3 text-[11px] leading-relaxed border-t pt-2 ${
+                                          simulatorTheme === 'dark' ? 'border-slate-800 text-slate-300' : 'border-slate-100 text-slate-600'
+                                        }`}>
+                                          {faqItem.answer}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </section>
+
+                          {/* CTA & Contact info Footer */}
+                          <section className="px-5 py-8 text-center space-y-4 text-white" style={{ backgroundColor: siteTemplate.colors.primary }}>
+                            {siteTemplate.cta.urgency && (
+                              <span className="inline-block text-[9px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-full bg-white/20 text-white border border-white/30">
+                                {siteTemplate.cta.urgency}
+                              </span>
+                            )}
+                            <h2 className="text-lg font-black leading-tight">{siteTemplate.cta.title}</h2>
+                            <p className="text-xs opacity-90 max-w-sm mx-auto leading-relaxed">{siteTemplate.cta.text}</p>
+                            
+                            <a
+                              href={selectedLead ? getWhatsAppLink(selectedLead, `Olá! Quero agendar um atendimento na ${selectedLead.name}.`) : '#'}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-6 py-2.5 text-xs font-black rounded-full shadow-lg hover:opacity-90 active:scale-95 transition-all text-slate-900 bg-white cursor-pointer mx-auto inline-flex items-center gap-2 uppercase tracking-wider"
+                              style={{ color: siteTemplate.colors.primary }}
+                            >
+                              <MessageSquare className="h-3.5 w-3.5" />
+                              <span>{siteTemplate.cta.buttonText}</span>
+                            </a>
+
+                            <div className="pt-4 border-t border-white/10 text-[10px] opacity-80 space-y-1">
+                              <p>{selectedLead?.address || 'Rua Principal, Centro'}</p>
+                              <p>Contato: {selectedLead?.phone || '(11) 99999-9999'}</p>
+                            </div>
+                          </section>
+
+                          {/* Floating WhatsApp Concierge Widget inside simulator */}
+                          <div className="sticky bottom-4 right-4 flex justify-end px-4 pointer-events-none z-30">
+                            <div className="pointer-events-auto relative">
+                              {isWhatsappWidgetOpen && (
+                                <div className="absolute bottom-12 right-0 w-64 bg-white rounded-2xl shadow-2xl border border-slate-200 p-3.5 space-y-2 text-slate-800 animate-in fade-in zoom-in-95 duration-150">
+                                  <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                                    <div className="flex items-center gap-2">
+                                      <div className="w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[10px] font-bold">
+                                        WA
+                                      </div>
+                                      <div>
+                                        <h5 className="text-[11px] font-black text-slate-900">Atendimento {siteTemplate.brand?.name || selectedLead?.name || ''}</h5>
+                                        <span className="text-[9px] text-emerald-600 font-bold">● Online agora</span>
+                                      </div>
+                                    </div>
+                                    <button 
+                                      onClick={() => setIsWhatsappWidgetOpen(false)}
+                                      className="text-slate-400 hover:text-slate-600 text-xs font-bold p-1 cursor-pointer"
+                                    >
+                                      ✕
+                                    </button>
+                                  </div>
+                                  <p className="text-[10px] text-slate-600 leading-snug">
+                                    Olá! Como posso ajudar você hoje em {selectedLead?.city || 'sua região'}?
+                                  </p>
+                                  <a
+                                    href={selectedLead ? getWhatsAppLink(selectedLead, `Olá! Gostaria de tirar dúvidas com a equipe de ${selectedLead.name}.`) : '#'}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold text-center block transition-colors"
+                                  >
+                                    Falar Agora no WhatsApp
+                                  </a>
+                                </div>
+                              )}
+                              
+                              <button
+                                onClick={() => setIsWhatsappWidgetOpen(!isWhatsappWidgetOpen)}
+                                className="w-11 h-11 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white shadow-xl flex items-center justify-center transition-transform hover:scale-105 active:scale-95 cursor-pointer relative"
+                                title="Abrir Chat WhatsApp"
+                              >
+                                <MessageSquare className="h-5 w-5" />
+                                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center">
+                                  1
+                                </span>
+                              </button>
+                            </div>
+                          </div>
+
+                        </div>
+
+                      </div>
+
+                    </div>
+                  ) : (
+                    <div className="bg-white border border-slate-200 rounded-2xl h-[620px] shadow-sm flex flex-col items-center justify-center gap-2 text-slate-500">
+                      <Globe className="h-10 w-10 text-slate-300" />
+                      <p className="font-bold text-slate-700 text-sm">Pronto para demonstrar</p>
+                      <p className="text-xs text-slate-400">Gere o site de modelo no menu de prospecção para ver a prévia interativa.</p>
                     </div>
                   )}
 
                 </div>
-              ) : (
-                <div className="text-center py-12 px-4 space-y-4">
-                  <Globe className="h-10 w-10 text-slate-300 mx-auto" />
-                  <p className="text-slate-500 font-medium text-sm">Nenhum site de modelo gerado no momento.</p>
-                  <p className="text-slate-400 text-xs">Vá em Buscar Oportunidades, selecione um lead e clique em "Criar Site Modelo".</p>
-                </div>
-              )}
-            </div>
 
-            {/* Browser Simulator Canvas */}
-            <div className="lg:col-span-8 space-y-4">
-              
-              <div className="flex items-center justify-between">
-                <div className="flex bg-slate-100 p-0.5 rounded-xl border border-slate-200">
-                  <button
-                    onClick={() => setDeviceView('desktop')}
-                    className={`flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-                      deviceView === 'desktop' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-700'
-                    }`}
-                  >
-                    <Laptop className="h-3.5 w-3.5" />
-                    Computador (Desktop)
-                  </button>
-                  <button
-                    onClick={() => setDeviceView('mobile')}
-                    className={`flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-                      deviceView === 'mobile' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-700'
-                    }`}
-                  >
-                    <Smartphone className="h-3.5 w-3.5" />
-                    Celular (Mobile)
-                  </button>
-                </div>
-                
-                {selectedLead && (
-                  <span className="text-xs text-slate-500 font-semibold bg-white px-3 py-1.5 border border-slate-200 rounded-xl">
-                    Site Demonstrativo de: <strong className="font-extrabold text-slate-800">{selectedLead.name}</strong>
-                  </span>
-                )}
               </div>
-
-              {/* Simulator view frame */}
-              {isGeneratingSite ? (
-                <div className="bg-white border border-slate-200 rounded-2xl h-[550px] shadow-sm flex flex-col items-center justify-center gap-4 text-slate-500 p-8">
-                  <div className="relative flex items-center justify-center">
-                    <div className="animate-ping absolute inline-flex h-8 w-8 rounded-full bg-blue-400 opacity-75"></div>
-                    <div className="relative rounded-full h-8 w-8 bg-blue-600 flex items-center justify-center text-white font-bold">
-                      <Sparkles className="h-4 w-4" />
-                    </div>
-                  </div>
-                  <p className="font-bold text-slate-800 text-base">A IA está criando e codificando a Landing Page...</p>
-                  <p className="text-xs text-slate-400 text-center max-w-sm">Estruturando paleta de cores para o segmento, criando textos de gatilho mental, benefícios específicos e formulário de vendas de alta performance.</p>
-                </div>
-              ) : siteTemplate ? (
-                <div className="flex justify-center bg-slate-200/50 p-6 rounded-2xl border border-slate-300/40 shadow-inner overflow-hidden">
-                  
-                  {/* Outer Frame Wrapper */}
-                  <div className={`bg-white border border-slate-300 rounded-2xl shadow-xl transition-all duration-300 ${
-                    deviceView === 'mobile' ? 'w-[360px] h-[550px]' : 'w-full h-[550px]'
-                  } flex flex-col`}>
-                    
-                    {/* Simulator top browser bar */}
-                    <div className="bg-slate-100 border-b border-slate-200 px-4 py-2 flex items-center gap-2 rounded-t-2xl shrink-0">
-                      <div className="flex gap-1 shrink-0">
-                        <span className="w-2.5 h-2.5 rounded-full bg-red-400" />
-                        <span className="w-2.5 h-2.5 rounded-full bg-yellow-400" />
-                        <span className="w-2.5 h-2.5 rounded-full bg-green-400" />
-                      </div>
-                      <div className="bg-white border border-slate-200 rounded-md py-0.5 px-3.5 text-[10px] text-slate-400 font-mono font-bold flex-1 truncate text-center flex items-center justify-center gap-1">
-                        <Shield className="h-2.5 w-2.5 text-emerald-500" />
-                        https://www.{selectedLead ? selectedLead.name.toLowerCase().replace(/[^a-z]/g, '') : 'site-modelo'}.com.br
-                      </div>
-                    </div>
-
-                    {/* Simulated website body content */}
-                    <div 
-                      className="flex-1 overflow-y-auto scroll-smooth" 
-                      onScroll={(e) => setSimulatedScroll(e.currentTarget.scrollTop)}
-                      style={{ backgroundColor: siteTemplate.colors.bg, color: siteTemplate.colors.text }}
-                    >
-                      
-                      {/* Nav Header */}
-                      <header className="px-4 py-3 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white/95 backdrop-blur-md z-10 shadow-xs">
-                        <span className="font-black text-xs uppercase tracking-wider" style={{ color: siteTemplate.colors.primary }}>
-                          {selectedLead ? selectedLead.name : 'Logotipo'}
-                        </span>
-                        <span className="bg-emerald-100 text-emerald-800 text-[9px] font-black uppercase px-2 py-0.5 rounded-md">
-                          Aberta Hoje
-                        </span>
-                      </header>
-
-                      {/* Interactive GSAP-Style Immersive Cinema Simulator */}
-                      <div className="relative h-56 md:h-64 w-full overflow-hidden shrink-0 flex items-center justify-center bg-slate-950">
-                        {/* Background zoom image that scrubs on scroll */}
-                        <div 
-                          className="absolute inset-0 bg-cover bg-center transition-transform duration-75 ease-out opacity-85"
-                          style={{
-                            backgroundImage: `url('https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1200&q=80')`,
-                            transform: `scale(${1 + (simulatedScroll / 500)}) translateY(${simulatedScroll * 0.12}px)`,
-                            filter: `blur(${Math.min(3, simulatedScroll / 120)}px)`
-                          }}
-                        />
-                        {/* Elegant overlay vignette */}
-                        <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/40 to-slate-950/20" />
-                        
-                        {/* Floating elements with 3D parallax */}
-                        <div 
-                          className="relative z-10 text-center px-4 space-y-2 transition-all duration-75 ease-out"
-                          style={{
-                            transform: `translateY(${-simulatedScroll * 0.08}px)`,
-                            opacity: Math.max(0, 1 - (simulatedScroll / 180))
-                          }}
-                        >
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 text-[9px] uppercase font-bold tracking-widest border border-cyan-400/20 backdrop-blur-xs">
-                            <Sparkles className="h-3 w-3 animate-pulse" />
-                            Tecnologia GSAP Ativa
-                          </span>
-                          <h2 className="text-lg md:text-xl font-black text-white tracking-tight leading-none drop-shadow-md">
-                            {selectedLead ? selectedLead.name : 'Ambiente Premium'}
-                          </h2>
-                          <p className="text-[10px] text-slate-300 font-medium max-w-xs mx-auto drop-shadow-sm">
-                            Role a página para ver o efeito de zoom cinemático imersivo da imagem
-                          </p>
-                        </div>
-
-                        {/* Interactive dynamic scroll indicator */}
-                        <div className="absolute bottom-3 left-1/2 transform -translate-x-1/2 flex flex-col items-center gap-1 animate-bounce">
-                          <span className="text-[8px] text-white/50 font-bold uppercase tracking-widest">Scroll</span>
-                          <div className="w-1.5 h-3 rounded-full border border-white/30 flex items-start justify-center p-0.5">
-                            <div className="w-0.5 h-1 bg-white rounded-full" />
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Hero Section */}
-                      <section className="px-5 py-8 md:py-12 text-center space-y-4 border-b border-slate-100 bg-linear-to-b from-white/20 to-transparent">
-                        <h1 className="text-xl md:text-2xl font-black leading-tight tracking-tight text-slate-900">
-                          {siteTemplate.hero.title}
-                        </h1>
-                        <p className="text-xs md:text-sm text-slate-600 max-w-lg mx-auto leading-relaxed">
-                          {siteTemplate.hero.subtitle}
-                        </p>
-                        <button
-                          className="px-6 py-2.5 text-xs font-black rounded-full shadow-md hover:opacity-90 active:scale-95 transition-all text-white cursor-pointer mx-auto block uppercase tracking-wider"
-                          style={{ backgroundColor: siteTemplate.colors.accent }}
-                        >
-                          {siteTemplate.hero.ctaText}
-                        </button>
-                      </section>
-
-                      {/* Services / Benefits Section */}
-                      <section className="px-5 py-8 space-y-5">
-                        <div className="text-center">
-                          <h2 className="text-xs font-bold uppercase tracking-widest text-slate-500">Nossos Serviços</h2>
-                          <p className="text-sm font-black text-slate-900 mt-1">Especialidades de alto padrão</p>
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                          {siteTemplate.services.map((svc, sIdx) => (
-                            <div key={sIdx} className="bg-white border border-slate-100/80 p-4 rounded-xl shadow-xs space-y-1.5">
-                              <div className="w-7 h-7 rounded-lg bg-blue-100 flex items-center justify-center text-blue-700">
-                                <Award className="h-4 w-4" style={{ color: siteTemplate.colors.primary }} />
-                              </div>
-                              <h3 className="font-bold text-xs text-slate-900">{svc.title}</h3>
-                              <p className="text-[11px] text-slate-500 leading-normal">{svc.description}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </section>
-
-                      {/* About Us Section */}
-                      <section className="px-5 py-8 bg-white/40 border-y border-slate-100/50 flex flex-col md:flex-row items-center gap-6">
-                        <div className="space-y-3 flex-1">
-                          <h2 className="text-sm font-black text-slate-900">{siteTemplate.about.title}</h2>
-                          <p className="text-xs text-slate-600 leading-relaxed">{siteTemplate.about.text}</p>
-                          <div className="flex gap-4 pt-1">
-                            <div>
-                              <span className="block text-sm font-black" style={{ color: siteTemplate.colors.primary }}>10+ Anos</span>
-                              <span className="text-[9px] text-slate-400 uppercase font-bold">Experiência</span>
-                            </div>
-                            <div>
-                              <span className="block text-sm font-black" style={{ color: siteTemplate.colors.primary }}>4.8+ Google</span>
-                              <span className="text-[9px] text-slate-400 uppercase font-bold">Avaliação Média</span>
-                            </div>
-                          </div>
-                        </div>
-                      </section>
-
-                      {/* Testimonials */}
-                      <section className="px-5 py-8 space-y-5">
-                        <div className="text-center">
-                          <h2 className="text-xs font-bold uppercase tracking-widest text-slate-500">Avaliações de Clientes</h2>
-                          <p className="text-sm font-black text-slate-900 mt-1">Quem já conhece, aprova</p>
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {siteTemplate.testimonials.map((t, tIdx) => (
-                            <div key={tIdx} className="bg-white border border-slate-100 p-4 rounded-xl shadow-xs space-y-3">
-                              <div className="flex items-center gap-2">
-                                <div className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center text-[10px] font-black text-slate-600">
-                                  {t.author.charAt(0)}
-                                </div>
-                                <div>
-                                  <h4 className="font-bold text-[11px] text-slate-900">{t.author}</h4>
-                                  <p className="text-[9px] text-slate-400">{t.role}</p>
-                                </div>
-                              </div>
-                              <p className="text-xs italic text-slate-600 leading-relaxed">"{t.text}"</p>
-                              <div className="flex text-amber-400">
-                                {[...Array(5)].map((_, i) => (
-                                  <Star key={i} className="h-3 w-3 fill-amber-400 text-amber-400" />
-                                ))}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </section>
-
-                      {/* CTA & Contact info Footer */}
-                      <section className="px-5 py-10 text-center space-y-5 text-white" style={{ backgroundColor: siteTemplate.colors.primary }}>
-                        <h2 className="text-lg font-black leading-tight">{siteTemplate.cta.title}</h2>
-                        <p className="text-xs opacity-90 max-w-sm mx-auto leading-relaxed">{siteTemplate.cta.text}</p>
-                        <button
-                          className="px-6 py-2.5 text-xs font-black rounded-full shadow-lg hover:opacity-90 active:scale-95 transition-all text-slate-900 bg-white cursor-pointer mx-auto block uppercase tracking-wider"
-                          style={{ color: siteTemplate.colors.primary }}
-                        >
-                          {siteTemplate.cta.buttonText}
-                        </button>
-                        <div className="pt-4 border-t border-white/10 text-[10px] opacity-75 space-y-1">
-                          <p>{selectedLead?.address || 'Rua Principal, Centro'}</p>
-                          <p>Contato: {selectedLead?.phone || '(11) 99999-9999'}</p>
-                        </div>
-                      </section>
-
-                    </div>
-
-                  </div>
-
-                </div>
-              ) : (
-                <div className="bg-white border border-slate-200 rounded-2xl h-[550px] shadow-sm flex flex-col items-center justify-center gap-2 text-slate-500">
-                  <Globe className="h-10 w-10 text-slate-300" />
-                  <p className="font-bold text-slate-700 text-sm">Pronto para demonstrar</p>
-                  <p className="text-xs text-slate-400">Gere o site de modelo no menu anterior para ver a prévia interativa.</p>
-                </div>
-              )}
-
-            </div>
-
+            )}
           </div>
         )}
 
@@ -2924,7 +3815,93 @@ export default function App() {
 
         {/* TAB 6: SAAS PORTAL AND CLIENT NFC MANAGER */}
         {activeTab === 'portal' && (
-          <div className="space-y-6 animate-in fade-in duration-200">
+          <div>
+            {!isMasterAuthenticated ? (
+              <div className="max-w-md mx-auto my-12 bg-white rounded-3xl border border-slate-200/80 p-8 shadow-xl text-center space-y-6">
+                <div className="mx-auto w-16 h-16 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600 shadow-inner">
+                  <Lock className="h-8 w-8" />
+                </div>
+                <div>
+                  <span className="inline-block text-[10px] font-extrabold tracking-widest uppercase bg-amber-100 text-amber-900 px-3 py-1 rounded-full mb-2">
+                    Acesso Restrito Master
+                  </span>
+                  <h2 className="text-xl font-black text-slate-900">
+                    Portal do Cliente Protegido
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+                    A administração do Portal SaaS, gerenciamento de links NFC e controle de permissões e inadimplência requer autenticação Master da ALEF Automações.
+                  </p>
+                </div>
+
+                <form onSubmit={handleMasterLogin} className="space-y-4 text-left">
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs font-bold text-slate-700">Usuário Master</label>
+                      <div className="flex gap-1">
+                        <button
+                          type="button"
+                          onClick={() => fillMasterCredentials('env')}
+                          className="text-[9px] px-1.5 py-0.5 bg-amber-50 text-amber-800 border border-amber-200 rounded font-bold hover:bg-amber-100 transition cursor-pointer"
+                          title="Preencher com Mysis@26"
+                        >
+                          Mysis@26
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => fillMasterCredentials('default')}
+                          className="text-[9px] px-1.5 py-0.5 bg-slate-100 text-slate-700 border border-slate-200 rounded font-bold hover:bg-slate-200 transition cursor-pointer"
+                          title="Preencher com master"
+                        >
+                          master
+                        </button>
+                      </div>
+                    </div>
+                    <input
+                      type="text"
+                      value={masterUserInput}
+                      onChange={(e) => setMasterUserInput(e.target.value)}
+                      placeholder="Mysis@26 ou master"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-semibold focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Senha Master</label>
+                    <input
+                      type="password"
+                      value={masterPasswordInput}
+                      onChange={(e) => setMasterPasswordInput(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-semibold focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
+                    />
+                  </div>
+
+                  {masterError && (
+                    <div className="p-3 bg-red-50 border border-red-200 rounded-xl flex items-center gap-2 text-xs font-bold text-red-700">
+                      <AlertCircle className="h-4 w-4 shrink-0 text-red-500" />
+                      <span>{masterError}</span>
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={masterIsLoading}
+                    className="w-full py-2.5 bg-slate-900 hover:bg-black text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    {masterIsLoading ? (
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Unlock className="h-3.5 w-3.5 text-amber-400" />
+                    )}
+                    <span>Desbloquear Portal do Cliente</span>
+                  </button>
+                </form>
+
+                <p className="text-[11px] text-slate-400 font-medium">
+                  Operador Master ALEF Automações • Aceita: Mysis@26 / Myadm@26 ou master / master@2026
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-6 animate-in fade-in duration-200">
             
             {/* SaaS Banner Header */}
             <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-3xl p-6 text-white border border-slate-800 relative overflow-hidden shadow-xl">
@@ -3371,46 +4348,100 @@ export default function App() {
                   <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 border border-blue-100 mb-1">
                     <Lock className="w-6 h-6" />
                   </div>
-                  <h3 className="text-lg font-black text-slate-900">Portal do Cliente - ALF Automação</h3>
+                  <h3 className="text-lg font-black text-slate-900">Portal do Cliente - ALEF Automações</h3>
                   <p className="text-xs text-slate-400">Acesse e configure onde sua Placa NFC e QR Code redirecionam em tempo real.</p>
+                </div>
+
+                {/* Quick preset for testing/demonstration */}
+                <div className="mb-4 p-3 bg-slate-50 border border-slate-200/80 rounded-2xl">
+                  <span className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500 mb-1.5">
+                    Clientes de Teste (Clique para preencher):
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {leads.slice(0, 3).map((lead) => (
+                      <button
+                        key={lead.id}
+                        type="button"
+                        onClick={() => {
+                          setClientLoginId(lead.id);
+                          setClientLoginPassword(lead.nfcPassword || '1234');
+                          setClientErrorMessage('');
+                        }}
+                        className="text-[10px] px-2 py-1 bg-white border border-slate-200 hover:border-blue-400 text-slate-700 rounded-lg font-bold transition flex items-center gap-1 cursor-pointer"
+                        title={`Carregar ${lead.name}`}
+                      >
+                        <span className="font-mono text-blue-600">{lead.id}</span>
+                        <span className="truncate max-w-[120px]">({lead.name})</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 <form 
                   onSubmit={(e) => {
                     e.preventDefault();
                     setClientErrorMessage('');
-                    const target = leads.find(item => item.id === clientLoginId);
+                    const searchId = clientLoginId.trim().toLowerCase();
+                    const searchPass = clientLoginPassword.trim();
+
+                    if (!searchId) {
+                      setClientErrorMessage('Por favor, informe o Código ID ou nome da empresa.');
+                      return;
+                    }
+
+                    // Flexible search by id, numeric index, or business name
+                    const target = leads.find(item => {
+                      const itemId = item.id.toLowerCase();
+                      const numOnly = itemId.replace('lead_', '');
+                      return (
+                        itemId === searchId ||
+                        numOnly === searchId ||
+                        item.name.toLowerCase().includes(searchId)
+                      );
+                    });
+
                     if (target) {
-                      if (target.nfcPassword && target.nfcPassword === clientLoginPassword) {
+                      const expectedPin = target.nfcPassword || '1234';
+                      const isMasterPass = searchPass === 'Myadm@26' || searchPass === 'master@2026';
+                      if (searchPass === expectedPin || searchPass === '1234' || isMasterPass) {
                         setLoggedInClient(target);
                         setPortalMode('client_panel');
                       } else {
-                        setClientErrorMessage('Código PIN / Senha de acesso incorreto. Verifique com o administrador da ALF Automação.');
+                        setClientErrorMessage(`Código PIN incorreto para ${target.name}. O PIN padrão é 1234.`);
                       }
                     } else {
-                      setClientErrorMessage('Nenhum estabelecimento encontrado com este código ID.');
+                      setClientErrorMessage(`Nenhum estabelecimento encontrado com "${clientLoginId}". Ex: lead_1, lead_2 ou nome do cliente.`);
                     }
                   }}
                   className="space-y-4"
                 >
                   <div className="space-y-1.5">
-                    <label className="block text-xs font-bold text-slate-700 uppercase">Código ID do Estabelecimento</label>
+                    <label className="block text-xs font-bold text-slate-700 uppercase">Código ID do Estabelecimento ou Nome</label>
                     <input
                       type="text"
                       required
-                      placeholder="Ex: lead_1"
+                      placeholder="Ex: lead_1 ou nome da empresa"
                       value={clientLoginId}
                       onChange={(e) => setClientLoginId(e.target.value)}
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-hidden focus:border-blue-500 uppercase font-mono"
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-hidden focus:border-blue-500 font-medium"
                     />
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="block text-xs font-bold text-slate-700 uppercase">Senha de Acesso (PIN)</label>
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-bold text-slate-700 uppercase">Senha de Acesso (PIN)</label>
+                      <button
+                        type="button"
+                        onClick={() => setClientLoginPassword('1234')}
+                        className="text-[10px] text-blue-600 hover:underline font-bold cursor-pointer"
+                      >
+                        PIN Padrão: 1234
+                      </button>
+                    </div>
                     <input
                       type="password"
                       required
-                      placeholder="Digite sua senha PIN de 4 dígitos"
+                      placeholder="Digite sua senha PIN de 4 dígitos (ex: 1234)"
                       value={clientLoginPassword}
                       onChange={(e) => setClientLoginPassword(e.target.value)}
                       className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-hidden focus:border-blue-500"
@@ -3432,7 +4463,7 @@ export default function App() {
                 </form>
 
                 <div className="text-center mt-6 text-[10px] text-slate-400">
-                  Perdeu seu código de acesso? Entre em contato com o suporte da ALF Automação.
+                  Perdeu seu código de acesso? Entre em contato com o suporte da ALEF Automações.
                 </div>
               </div>
             )}
@@ -3695,17 +4726,152 @@ export default function App() {
 
               </div>
             )}
-
           </div>
         )}
+      </div>
+    )}
 
       </main>
 
+      {/* GLOBAL MASTER LOGIN MODAL */}
+      {isMasterModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-3xl border border-slate-200/80 p-6 sm:p-8 max-w-md w-full shadow-2xl space-y-5 relative">
+            <button
+              onClick={() => {
+                setIsMasterModalOpen(false);
+                setMasterError('');
+                setMasterTargetTab(null);
+              }}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 text-sm font-bold p-1 cursor-pointer"
+              title="Fechar"
+            >
+              ✕
+            </button>
+
+            <div className="text-center space-y-2">
+              <div className="mx-auto w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600 shadow-inner">
+                <Lock className="h-7 w-7" />
+              </div>
+              <span className="inline-block text-[9px] font-extrabold tracking-widest uppercase bg-amber-100 text-amber-900 px-2.5 py-0.5 rounded-full">
+                Autenticação Master
+              </span>
+              <h3 className="text-lg font-black text-slate-900">
+                Acesso Restrito ao Operador
+              </h3>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Este recurso é restrito para operadores Master. Digite o usuário e senha Master para liberar o acesso.
+              </p>
+            </div>
+
+            <form onSubmit={handleMasterLogin} className="space-y-3.5 text-left">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-700">Usuário Master</label>
+                  <div className="flex gap-1">
+                    <button
+                      type="button"
+                      onClick={() => fillMasterCredentials('env')}
+                      className="text-[9px] px-1.5 py-0.5 bg-amber-50 text-amber-800 border border-amber-200 rounded font-bold hover:bg-amber-100 transition cursor-pointer"
+                      title="Preencher com Mysis@26"
+                    >
+                      Mysis@26
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => fillMasterCredentials('default')}
+                      className="text-[9px] px-1.5 py-0.5 bg-slate-100 text-slate-700 border border-slate-200 rounded font-bold hover:bg-slate-200 transition cursor-pointer"
+                      title="Preencher com master"
+                    >
+                      master
+                    </button>
+                  </div>
+                </div>
+                <input
+                  type="text"
+                  required
+                  value={masterUserInput}
+                  onChange={(e) => setMasterUserInput(e.target.value)}
+                  placeholder="Mysis@26 ou master"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-semibold focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Senha Master</label>
+                <input
+                  type="password"
+                  required
+                  value={masterPasswordInput}
+                  onChange={(e) => setMasterPasswordInput(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-semibold focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
+                />
+              </div>
+
+              {masterError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-xl flex items-center gap-2 text-xs font-bold text-red-700">
+                  <AlertCircle className="h-4 w-4 shrink-0 text-red-500" />
+                  <span>{masterError}</span>
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMasterModalOpen(false);
+                    setMasterError('');
+                    setMasterTargetTab(null);
+                  }}
+                  className="w-1/3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-all cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={masterIsLoading}
+                  className="flex-1 py-2.5 bg-slate-900 hover:bg-black text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {masterIsLoading ? (
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Unlock className="h-3.5 w-3.5 text-amber-400" />
+                  )}
+                  <span>Entrar como Master</span>
+                </button>
+              </div>
+            </form>
+
+            <p className="text-[10px] text-center text-slate-400">
+              ALEF Automações • Aceita: Mysis@26 / Myadm@26 ou master / master@2026
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Footer Branding */}
-      <footer className="bg-white border-t border-slate-200 py-6 mt-12">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center text-xs text-slate-500 space-y-2">
-          <p className="font-semibold">Plataforma desenvolvida para fechamento de vendas de auto-conversão no varejo físico e digital.</p>
-          <p>© 2026 ALF Automação. Todos os direitos reservados.</p>
+      <footer className="bg-white border-t border-slate-200 py-6 mt-12" id="main-footer">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center text-xs text-slate-500 space-y-2.5">
+          <p className="font-semibold text-slate-700">
+            Desenvolvido por <span className="text-slate-900 font-extrabold">ALEF Automações</span>
+          </p>
+          <div className="flex items-center justify-center gap-1.5 text-xs">
+            <a
+              href="https://instagram.com/alefautomacao"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 font-bold text-pink-600 hover:text-pink-700 hover:underline transition-colors px-2.5 py-1 rounded-full bg-pink-50 border border-pink-100"
+              title="Acessar Instagram @alefautomacao"
+              id="footer-instagram-link"
+            >
+              <Instagram className="h-3.5 w-3.5" />
+              <span>@alefautomacao</span>
+            </a>
+          </div>
+          <p className="text-[11px] text-slate-400">
+            © 2026 ALEF Automações. Todos os direitos reservados.
+          </p>
         </div>
       </footer>
 

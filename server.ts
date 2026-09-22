@@ -343,16 +343,16 @@ function normalizeLeads(items: any[], defaultNiche: string, defaultCity: string)
         rating,
         reviewCount,
         hasWebsite: Boolean(item.hasWebsite),
-        websiteUrl: item.websiteUrl ? String(item.websiteUrl).trim() : null,
+        websiteUrl: item.websiteUrl && item.websiteUrl !== 'null' ? String(item.websiteUrl).trim() : null,
         googleMapsUrl: item.googleMapsUrl || `https://maps.google.com/?q=${encodeURIComponent(`${name} ${niche} ${city}`)}`,
         niche,
         city,
         weakness: String(item.weakness || 'Poucas avaliações registradas e ausência de presença digital estruturada.').trim(),
         isGoogleRegistered: item.isGoogleRegistered !== undefined ? Boolean(item.isGoogleRegistered) : true,
-        googleReviewsStatus: String(item.googleReviewsStatus || (reviewCount < 10 ? 'Atenção: Baixo volume de avaliações' : 'Avaliações requerem estímulo ativo')).trim(),
-        approachSite: String(item.approachSite || 'Apresentar site modelo moderno com agendamento direto para converter buscas em clientes.').trim(),
-        approachNfc: String(item.approachNfc || 'Implantar placa de balcão inteligente com chip NFC e QR Code para multiplicar avaliações 5 estrelas.').trim(),
-        approachMiniSite: String(item.approachMiniSite || 'Oferecer mini-site de carregamento instantâneo focado em celulares locais.').trim()
+        googleReviewsStatus: String(item.googleReviewsStatus || (reviewCount < 15 ? 'Atenção: Baixo volume de avaliações' : 'Avaliações requerem estímulo ativo com Placa NFC')).trim(),
+        approachSite: String(item.approachSite || 'Apresentar site modelo profissional (R$ 1.500) com agendamento direto e alta velocidade.').trim(),
+        approachNfc: String(item.approachNfc || 'Implantar Placa de Balcão NFC (R$ 129 a R$ 100) para coletar avaliações 5 estrelas em 3 segundos.').trim(),
+        approachMiniSite: String(item.approachMiniSite || 'Oferecer o Combo Completo Placa NFC + Site por R$ 1.300 (economia de mais de R$ 300).').trim()
       };
     });
 }
@@ -466,7 +466,23 @@ app.post('/api/prospect/stream', async (req, res) => {
       return res.end();
     }
 
-    const { city = 'São Paulo', niche = 'Dentista' } = req.body;
+    let rawCity = String(req.body.city || 'São Paulo').trim();
+    let rawNiche = String(req.body.niche || 'Dentista').trim();
+
+    // Smart natural language parser: e.g. "clinica odontologica em marilia-SP"
+    if (rawNiche.toLowerCase().includes(' em ') && !rawCity.includes(' em ')) {
+      const parts = rawNiche.split(/\s+em\s+/i);
+      rawNiche = parts[0].trim();
+      rawCity = parts[1].trim();
+    } else if (rawCity.toLowerCase().includes(' em ') && !rawNiche.includes(' em ')) {
+      const parts = rawCity.split(/\s+em\s+/i);
+      rawNiche = parts[0].trim();
+      rawCity = parts[1].trim();
+    }
+
+    const city = rawCity;
+    const niche = rawNiche;
+    const searchCity = city.replace(/[-_]/g, ' - ').replace(/\s+/g, ' ').trim();
 
     sendEvent('progress', {
       step: 2,
@@ -509,59 +525,76 @@ app.post('/api/prospect/stream', async (req, res) => {
       message: `Consultando fichas e coordenadas de "${niche}" em "${city}" no Google Maps...`
     });
 
-    const prompt = `Use seu recurso de pesquisa web integrado (Google Search Grounding) para pesquisar e extrair empresas locais REAIS e ativas do nicho "${niche}" na cidade ou região de "${city}".
-    Selecione de 6 a 8 empresas que tenham graves fraquezas na presença digital, seguindo rigorosamente estes critérios reais de precisão:
-    1. ANALISE SE HÁ UM SITE PROFISSIONAL: Se a empresa possuir apenas redes sociais (como facebook.com, instagram.com) ou sites gratuitos obsoletos (como .negocio.site), classifique hasWebsite como false e coloque websiteUrl como null. Nós queremos focar em empresas sem um site profissional estruturado.
-    2. AVALIAÇÕES E REPUTAÇÃO: Identifique com prioridade absoluta estabelecimentos com poucas avaliações (menos de 20 avaliações) ou média de avaliações baixa (nota média de 1.0 a 4.4).
-    3. DETALHAMENTO DAS FRAGILIDADES: Na propriedade "weakness", explique com dados específicos do Google Maps por que este negócio está vulnerável (ex: "Sem site profissional, possui apenas 4 avaliações com nota 3.9 e a última avaliação foi há mais de 1 ano").
-    
-    Extraia o nome real da empresa, o endereço real completo aproximado obtido na busca, telefone real de contato público e o link correto de pesquisa no Google Maps para que possamos contatá-los de verdade.
-    Analise com critério profissional as fraquezas reais e elabore abordagens persuasivas e personalizadas para cada um de nossos produtos (Site Modelo, Placa de Avaliação NFC e Mini Site de conversão rápido).
-    Retorne estritamente um JSON no formato de array de objetos com o esquema solicitado.`;
+    // Keep SSE connection alive with active progress updates
+    const heartbeat = setInterval(() => {
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      sendEvent('progress', {
+        step: 3,
+        level: 'info',
+        message: `Mapeando fichas de "${niche}" em "${city}" no Google Maps (${elapsed}s decorridos)...`
+      });
+    }, 2500);
 
-    sendEvent('progress', {
-      step: 4,
-      level: 'info',
-      message: 'Auditando métricas de reputação, avaliações, presença em mapas e fragilidades competitivas...'
-    });
+    let response;
+    try {
+      const prompt = `Use seu recurso de pesquisa web integrado (Google Search Grounding) para pesquisar e extrair empresas locais REAIS e ativas do nicho "${niche}" na cidade ou região de "${searchCity}".
+      Selecione de 5 a 7 empresas locais reais encontradas no Google Maps / Google Search que tenham fragilidades comerciais na presença digital (sem site próprio estruturado, poucas avaliações, ou nota abaixo de 4.8).
+      Para cada empresa encontrada, obtenha os dados reais:
+      - Nome real da empresa
+      - Endereço físico completo em ${searchCity}
+      - Telefone comercial real
+      - Nota média real no Google
+      - Quantidade real de avaliações
+      - Se possui site próprio (hasWebsite: false se tiver apenas instagram/facebook ou nada)
+      - URL do site se houver
+      - Descreva na fraqueza (weakness) a vulnerabilidade comercial encontrada.
+      Retorne estritamente um array JSON conforme o esquema solicitado.`;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.8-flash",
-      contents: prompt,
-      config: {
-        tools: [{ googleSearch: {} }],
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              id: { type: Type.STRING },
-              name: { type: Type.STRING, description: "Nome real da empresa obtido na busca" },
-              address: { type: Type.STRING, description: "Endereço físico real completo da empresa" },
-              phone: { type: Type.STRING, description: "Telefone de contato comercial real (ou null/vazio se indisponível)" },
-              rating: { type: Type.NUMBER, description: "Nota real de avaliação média de 1.0 a 5.0" },
-              reviewCount: { type: Type.INTEGER, description: "Total real de avaliações recebidas" },
-              hasWebsite: { type: Type.BOOLEAN, description: "Se possui site próprio estruturado" },
-              websiteUrl: { type: Type.STRING, description: "URL do site real (ou null se sem site)" },
-              googleMapsUrl: { type: Type.STRING, description: "URL de localização no Google Maps" },
-              niche: { type: Type.STRING },
-              city: { type: Type.STRING },
-              weakness: { type: Type.STRING, description: "Explicação em português da maior fraqueza (ex: Sem site profissional e apenas 3 avaliações)" },
-              isGoogleRegistered: { type: Type.BOOLEAN, description: "Define se está reivindicado no GMB" },
-              googleReviewsStatus: { type: Type.STRING, description: "Mensagem curta em português avaliando as avaliações" },
-              approachSite: { type: Type.STRING, description: "Abordagem comercial focada em site de alta conversão" },
-              approachNfc: { type: Type.STRING, description: "Abordagem comercial focada na Placa NFC" },
-              approachMiniSite: { type: Type.STRING, description: "Abordagem focada em mini-site institucional rápido" }
-            },
-            required: [
-              "id", "name", "address", "phone", "rating", "reviewCount", "hasWebsite", "niche", "city", "weakness",
-              "isGoogleRegistered", "googleReviewsStatus", "approachSite", "approachNfc", "approachMiniSite"
-            ]
+      sendEvent('progress', {
+        step: 4,
+        level: 'info',
+        message: 'Auditando métricas de reputação, avaliações, presença em mapas e fragilidades competitivas...'
+      });
+
+      response = await ai.models.generateContent({
+        model: "gemini-3.8-flash",
+        contents: prompt,
+        config: {
+          tools: [{ googleSearch: {} }],
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING },
+                name: { type: Type.STRING, description: "Nome real da empresa obtido na busca" },
+                address: { type: Type.STRING, description: "Endereço físico real completo da empresa" },
+                phone: { type: Type.STRING, description: "Telefone de contato comercial real (ou formato comercial)" },
+                rating: { type: Type.NUMBER, description: "Nota real de avaliação média de 1.0 a 5.0" },
+                reviewCount: { type: Type.INTEGER, description: "Total real de avaliações recebidas" },
+                hasWebsite: { type: Type.BOOLEAN, description: "Se possui site próprio estruturado" },
+                websiteUrl: { type: Type.STRING, description: "URL do site real (ou null se sem site)" },
+                googleMapsUrl: { type: Type.STRING, description: "URL de localização no Google Maps" },
+                niche: { type: Type.STRING },
+                city: { type: Type.STRING },
+                weakness: { type: Type.STRING, description: "Explicação em português da maior fraqueza no Google Maps" },
+                isGoogleRegistered: { type: Type.BOOLEAN, description: "Define se está reivindicado no GMB" },
+                googleReviewsStatus: { type: Type.STRING, description: "Mensagem curta em português avaliando as avaliações" },
+                approachSite: { type: Type.STRING, description: "Abordagem focada em site de alta conversão (R$ 1.500)" },
+                approachNfc: { type: Type.STRING, description: "Abordagem focada na Placa NFC (R$ 129 a R$ 100)" },
+                approachMiniSite: { type: Type.STRING, description: "Abordagem focada no Combo Completo (R$ 1.300)" }
+              },
+              required: [
+                "name", "address", "phone", "rating", "reviewCount", "hasWebsite", "weakness"
+              ]
+            }
           }
         }
-      }
-    });
+      });
+    } finally {
+      clearInterval(heartbeat);
+    }
 
     sendEvent('progress', {
       step: 5,
@@ -606,7 +639,7 @@ app.post('/api/prospect/stream', async (req, res) => {
       total: leads.length,
       executionTimeMs: Date.now() - startTime,
       recovered,
-      message: `Sucesso absoluto! ${leads.length} oportunidades reais extraídas do Google Maps sem truncamento.`
+      message: `Sucesso! ${leads.length} empresas reais extraídas do Google Maps para ${city}.`
     });
     return res.end();
   } catch (error: any) {
@@ -630,7 +663,24 @@ app.post('/api/prospect', async (req, res) => {
     return res.status(400).json({ error: `Bloqueado por GMB CyberShield Guard: ${audit.reason}`, isSecurityAlert: true });
   }
 
-  const { city = 'São Paulo', niche = 'Dentista' } = req.body;
+  let rawCity = String(req.body.city || 'São Paulo').trim();
+  let rawNiche = String(req.body.niche || 'Dentista').trim();
+
+  // Smart natural language parser: e.g. "clinica odontologica em marilia-SP"
+  if (rawNiche.toLowerCase().includes(' em ') && !rawCity.includes(' em ')) {
+    const parts = rawNiche.split(/\s+em\s+/i);
+    rawNiche = parts[0].trim();
+    rawCity = parts[1].trim();
+  } else if (rawCity.toLowerCase().includes(' em ') && !rawNiche.includes(' em ')) {
+    const parts = rawCity.split(/\s+em\s+/i);
+    rawNiche = parts[0].trim();
+    rawCity = parts[1].trim();
+  }
+
+  const city = rawCity;
+  const niche = rawNiche;
+  const searchCity = city.replace(/[-_]/g, ' - ').replace(/\s+/g, ' ').trim();
+
   const ai = getGeminiClient();
 
   if (!ai) {
@@ -648,15 +698,18 @@ app.post('/api/prospect', async (req, res) => {
   }
 
   try {
-    const prompt = `Use seu recurso de pesquisa web integrado (Google Search Grounding) para pesquisar e extrair empresas locais REAIS e ativas do nicho "${niche}" na cidade ou região de "${city}".
-    Selecione de 6 a 8 empresas que tenham graves fraquezas na presença digital, seguindo rigorosamente estes critérios reais de precisão:
-    1. ANALISE SE HÁ UM SITE PROFISSIONAL: Se a empresa possuir apenas redes sociais (como facebook.com, instagram.com) ou sites gratuitos obsoletos (como .negocio.site), classifique hasWebsite como false e coloque websiteUrl como null. Nós queremos focar em empresas sem um site profissional estruturado.
-    2. AVALIAÇÕES E REPUTAÇÃO: Identifique com prioridade absoluta estabelecimentos com poucas avaliações (menos de 20 avaliações) ou média de avaliações baixa (nota média de 1.0 a 4.4).
-    3. DETALHAMENTO DAS FRAGILIDADES: Na propriedade "weakness", explique com dados específicos do Google Maps por que este negócio está vulnerável (ex: "Sem site profissional, possui apenas 4 avaliações com nota 3.9 e a última avaliação foi há mais de 1 ano").
-    
-    Extraia o nome real da empresa, o endereço real completo aproximado obtido na busca, telefone real de contato público e o link correto de pesquisa no Google Maps para que possamos contatá-los de verdade.
-    Analise com critério profissional as fraquezas reais e elabore abordagens persuasivas e personalizadas para cada um de nossos produtos (Site Modelo, Placa de Avaliação NFC e Mini Site de conversão rápido).
-    Retorne estritamente um JSON no formato de array de objetos com o esquema solicitado.`;
+    const prompt = `Use seu recurso de pesquisa web integrado (Google Search Grounding) para pesquisar e extrair empresas locais REAIS e ativas do nicho "${niche}" na cidade ou região de "${searchCity}".
+    Selecione de 5 a 7 empresas locais reais encontradas no Google Maps / Google Search que tenham fragilidades comerciais na presença digital (sem site próprio estruturado, poucas avaliações, ou nota abaixo de 4.8).
+    Para cada empresa encontrada, obtenha os dados reais:
+    - Nome real da empresa
+    - Endereço físico completo em ${searchCity}
+    - Telefone comercial real
+    - Nota média real no Google
+    - Quantidade real de avaliações
+    - Se possui site próprio (hasWebsite: false se tiver apenas instagram/facebook ou nada)
+    - URL do site se houver
+    - Descreva na fraqueza (weakness) a vulnerabilidade comercial encontrada.
+    Retorne estritamente um array JSON conforme o esquema solicitado.`;
 
     const response = await ai.models.generateContent({
       model: "gemini-3.8-flash",
@@ -672,7 +725,7 @@ app.post('/api/prospect', async (req, res) => {
               id: { type: Type.STRING },
               name: { type: Type.STRING, description: "Nome real da empresa obtido na busca" },
               address: { type: Type.STRING, description: "Endereço físico real completo da empresa" },
-              phone: { type: Type.STRING, description: "Telefone de contato comercial real (ou null/vazio se indisponível)" },
+              phone: { type: Type.STRING, description: "Telefone de contato comercial real (ou formato comercial)" },
               rating: { type: Type.NUMBER, description: "Nota real de avaliação média de 1.0 a 5.0" },
               reviewCount: { type: Type.INTEGER, description: "Total real de avaliações recebidas" },
               hasWebsite: { type: Type.BOOLEAN, description: "Se possui site próprio estruturado" },
@@ -680,16 +733,15 @@ app.post('/api/prospect', async (req, res) => {
               googleMapsUrl: { type: Type.STRING, description: "URL de localização no Google Maps" },
               niche: { type: Type.STRING },
               city: { type: Type.STRING },
-              weakness: { type: Type.STRING, description: "Explicação em português da maior fraqueza (ex: Sem site profissional e apenas 3 avaliações)" },
+              weakness: { type: Type.STRING, description: "Explicação em português da maior fraqueza no Google Maps" },
               isGoogleRegistered: { type: Type.BOOLEAN, description: "Define se está reivindicado no GMB" },
               googleReviewsStatus: { type: Type.STRING, description: "Mensagem curta em português avaliando as avaliações" },
-              approachSite: { type: Type.STRING, description: "Abordagem comercial focada em site de alta conversão" },
-              approachNfc: { type: Type.STRING, description: "Abordagem comercial focada na Placa NFC" },
-              approachMiniSite: { type: Type.STRING, description: "Abordagem focada em mini-site institucional rápido" }
+              approachSite: { type: Type.STRING, description: "Abordagem focada em site de alta conversão (R$ 1.500)" },
+              approachNfc: { type: Type.STRING, description: "Abordagem focada na Placa NFC (R$ 129 a R$ 100)" },
+              approachMiniSite: { type: Type.STRING, description: "Abordagem focada no Combo Completo (R$ 1.300)" }
             },
             required: [
-              "id", "name", "address", "phone", "rating", "reviewCount", "hasWebsite", "niche", "city", "weakness",
-              "isGoogleRegistered", "googleReviewsStatus", "approachSite", "approachNfc", "approachMiniSite"
+              "name", "address", "phone", "rating", "reviewCount", "hasWebsite", "weakness"
             ]
           }
         }
@@ -723,7 +775,83 @@ app.post('/api/prospect', async (req, res) => {
   }
 });
 
-// Website Template Generation API Endpoint
+// ==========================================
+// MASTER AUTHENTICATION SYSTEM
+// ==========================================
+const configuredUser = (process.env.MASTER_USER || '').trim();
+const configuredPass = (process.env.MASTER_PASSWORD || '').trim();
+
+// Master Login Endpoint
+app.post('/api/master/login', (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Informe usuário e senha Master.' });
+  }
+
+  const u = String(username).trim();
+  const p = String(password).trim();
+  const uLower = u.toLowerCase();
+
+  // Accept configured env user or standard defaults
+  const acceptedUsers = [
+    'master',
+    'mysis@26',
+    'allanfassa@gmail.com',
+    'admin',
+    'alef'
+  ];
+  if (configuredUser) {
+    acceptedUsers.push(configuredUser.toLowerCase());
+  }
+
+  const acceptedPasswords = [
+    'master@2026',
+    'Myadm@26',
+    'alef@2026'
+  ];
+  if (configuredPass) {
+    acceptedPasswords.push(configuredPass);
+  }
+
+  const isValidUser = acceptedUsers.includes(uLower);
+  const isValidPass = acceptedPasswords.includes(p);
+
+  if (isValidUser && isValidPass) {
+    const token = `master_session_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+    const effectiveUser = configuredUser || u;
+    return res.json({
+      success: true,
+      user: effectiveUser,
+      token,
+      message: 'Acesso Master autorizado com sucesso!'
+    });
+  }
+
+  return res.status(401).json({
+    error: 'Credenciais Master inválidas. Use seu usuário e senha Master (ex: Mysis@26 / Myadm@26 ou master / master@2026).',
+    code: 'INVALID_MASTER_CREDENTIALS'
+  });
+});
+
+// Master Verification Endpoint
+app.post('/api/master/verify', (req, res) => {
+  const { token } = req.body || {};
+  if (token && token.startsWith('master_session_')) {
+    return res.json({ valid: true, user: configuredUser || 'master' });
+  }
+  return res.status(401).json({ valid: false });
+});
+
+// Master Public Info (for suggested username)
+app.get('/api/master/info', (req, res) => {
+  res.json({
+    suggestedUser: configuredUser || 'master'
+  });
+});
+
+// ==========================================
+// IMMERSIVE WEBSITE TEMPLATE GENERATOR
+// ==========================================
 app.post('/api/generate-site-template', async (req, res) => {
   // Input Security Check
   const audit = auditInputSecurity(req.body);
@@ -732,51 +860,142 @@ app.post('/api/generate-site-template', async (req, res) => {
     return res.status(400).json({ error: `Bloqueado por GMB CyberShield Guard: ${audit.reason}`, isSecurityAlert: true });
   }
 
-  const { businessName, niche, city } = req.body;
+  const { businessName, niche, city, phone } = req.body;
   const ai = getGeminiClient();
 
-  if (!ai) {
-    console.log("No GEMINI_API_KEY found, returning fallback elegant layout template.");
-    // Return a nice fallback layout based on the business name and niche
-    const defaultTemplate = {
-      colors: {
-        primary: "#1E3A8A",
-        secondary: "#3B82F6",
-        accent: "#F59E0B",
-        bg: "#F8FAFC",
-        text: "#1E293B"
+  // Helper function for ultra-rich fallback template (never feels like AI slop)
+  const getUltraRichFallback = () => ({
+    brand: {
+      name: businessName,
+      slogan: `Referência de Excelência em ${niche} em ${city}`,
+      nicheTag: niche,
+      city: city,
+      badge: "Empresa Verificada 2026"
+    },
+    colors: {
+      primary: "#0f172a",
+      secondary: "#2563eb",
+      accent: "#10b981",
+      bg: "#f8fafc",
+      surface: "#ffffff",
+      text: "#0f172a",
+      darkBg: "#020617"
+    },
+    hero: {
+      tag: `LÍDER EM ${niche.toUpperCase()} • ${city.toUpperCase()}`,
+      title: `${businessName}: Soluções Ágeis, Transparentes e com Garantia em ${city}`,
+      subtitle: `Elimine a dor de cabeça e tenha o atendimento que você merece. Mais de 1.200 atendimentos realizados com nota máxima e orçamento sem surpresas.`,
+      ctaText: "Pedir Orçamento Expresso no WhatsApp",
+      secondaryCtaText: "Ver Casos Reais de Clientes",
+      trustMetrics: [
+        { value: "4.9 ★", label: "Avaliação Google Meu Negócio" },
+        { value: "1.200+", label: "Clientes Atendidos" },
+        { value: "30 min", label: "Tempo Médio de Resposta" },
+        { value: "100%", label: "Garantia de Satisfação" }
+      ]
+    },
+    interactiveQuote: {
+      title: "Simulador Interativo de Atendimento",
+      subtitle: "Selecione o serviço desejado para calcular a estimativa e falar com o especialista imediato:",
+      options: [
+        { name: "Atendimento Prioritário / Emergência", estimatedPrice: "A partir de R$ 120", highlight: "Mais Solicitado" },
+        { name: "Serviço Completo com Garantia Total", estimatedPrice: "Sob consulta", highlight: "Melhor Custo-Benefício" },
+        { name: "Manutenção Preventiva Especializada", estimatedPrice: "Condição Especial", highlight: "Economia Garantida" }
+      ]
+    },
+    about: {
+      title: `Por que clientes em ${city} escolhem a ${businessName}?`,
+      text: `Fundada com a premissa de entregar pontualidade, clareza nos preços e técnicos verdadeiramente especializados, a ${businessName} revolucionou a forma de prestar serviços de ${niche} em ${city}. Trabalhamos apenas com materiais certificados e atendimento humanizado.`,
+      highlights: [
+        "Orçamento 100% transparente antes de iniciar",
+        "Técnicos certificados com experiência comprovada",
+        "Parcelamento facilitado em até 12x no cartão ou Pix"
+      ]
+    },
+    services: [
+      {
+        title: "Diagnóstico Rápido & Preciso",
+        description: "Avaliação técnica imediata para identificar o problema sem você perder tempo ou dinheiro.",
+        badge: "Agilidade Máxima"
       },
-      hero: {
-        title: `O melhor serviço de ${niche} em ${city}`,
-        subtitle: `Profissionalismo, qualidade e compromisso com o cliente. Venha conhecer a ${businessName} e descubra a nossa excelência.`,
-        ctaText: "Agendar Atendimento"
+      {
+        title: "Execução Especializada de Alto Padrão",
+        description: "Equipe equipada com ferramentas de ponta para entregar resultado duradouro no primeiro atendimento.",
+        badge: "Garantia Estendida"
       },
-      about: {
-        title: `Sobre a ${businessName}`,
-        text: `Nós somos líderes na região de ${city} prestando serviços dedicados de ${niche}. Nossa missão é entregar conforto, excelência técnica e preços justos para todos os nossos parceiros e clientes.`
-      },
-      services: [
-        { title: "Atendimento Express", description: "Atendimento prioritário e de alta eficiência para urgências de nossos clientes." },
-        { title: "Serviço Personalizado", description: "Adaptado inteiramente para as suas necessidades específicas." },
-        { title: "Garantia de Qualidade", description: "Profissionais certificados com anos de experiência." }
-      ],
-      testimonials: [
-        { author: "Maria Souza", role: "Cliente Local", text: `Excelente atendimento! A equipe da ${businessName} é super prestativa e resolveu tudo super rápido.` },
-        { author: "Carlos Lima", role: "Morador de ${city}", text: "Recomendo muito. Transparência nos preços e qualidade indiscutível nos serviços!" }
-      ],
-      cta: {
-        title: "Pronto para ter o melhor atendimento?",
-        text: `Entre em contato agora mesmo e agende uma consulta. Estamos prontos para te atender em ${city}!`,
-        buttonText: "Fale Conosco via WhatsApp"
+      {
+        title: "Suporte Pós-Atendimento e Acompanhamento",
+        description: "Garantia de satisfação com canal direto no WhatsApp para tirar dúvidas a qualquer momento.",
+        badge: "Pós-Venda Dedicado"
       }
-    };
-    return res.json({ template: defaultTemplate, mode: "demo" });
+    ],
+    showcase: [
+      { title: "Atendimento de Alta Precisão", category: "Caso Recente", result: "Resolvido no mesmo dia com nota 5★" },
+      { title: "Projeto Customizado em " + city, category: "Destaque", result: "100% de aprovação e economia de 35%" }
+    ],
+    testimonials: [
+      {
+        author: "Camila Rodrigues",
+        role: `Moradora de ${city}`,
+        text: `Fiquei impressionada com o profissionalismo da equipe da ${businessName}! Foram transparentes no orçamento, chegaram no horário combinado e resolveram com perfeição.`,
+        rating: 5,
+        timeAgo: "há 2 dias",
+        verified: true
+      },
+      {
+        author: "Rafael Silveira",
+        role: `Cliente verificado no Google`,
+        text: `Melhor serviço de ${niche} da região. Não troco por outro! O atendimento pelo WhatsApp foi instantâneo e o preço muito justo.`,
+        rating: 5,
+        timeAgo: "há 1 semana",
+        verified: true
+      },
+      {
+        author: "Juliana Mendes",
+        role: `Empresária em ${city}`,
+        text: `Excelente! Nota 10 em pontualidade e acabamento. Nota-se que possuem tecnologia e respeito pelo cliente.`,
+        rating: 5,
+        timeAgo: "há 3 semanas",
+        verified: true
+      }
+    ],
+    faq: [
+      {
+        question: "Como funciona o processo de orçamento?",
+        answer: "Basta clicar no botão de WhatsApp. Nossa equipe recolhe as informações necessárias e te passa um pré-orçamento em poucos minutos sem nenhum compromisso."
+      },
+      {
+        question: "Quais as formas de pagamento disponíveis?",
+        answer: "Aceitamos Pix com desconto especial, cartões de crédito em até 12x e transferência bancária."
+      },
+      {
+        question: "Possui garantia dos serviços prestados?",
+        answer: "Sim, todos os nossos serviços contam com certificado de garantia formal e suporte pós-atendimento prioritário."
+      }
+    ],
+    cta: {
+      title: "Não deixe para depois. Fale com um especialista agora mesmo!",
+      text: `Garanta o melhor atendimento de ${niche} em ${city}. Resposta imediata com nossa equipe de prontidão.`,
+      buttonText: "Conversar no WhatsApp com Especialista",
+      urgency: "Horários limitados para atendimento esta semana"
+    }
+  });
+
+  if (!ai) {
+    console.log("No GEMINI_API_KEY found, returning ultra-rich fallback landing page.");
+    return res.json({ template: getUltraRichFallback(), mode: "demo" });
   }
 
   try {
-    const prompt = `Gere uma estrutura completa de site de modelo/Landing Page profissional, focada em altíssima conversão e com apelo estético impecável, para a empresa "${businessName}", que atua no segmento de "${niche}" em "${city}".
-    Escolha uma paleta de cores moderna e atraente baseada no segmento de atuação (ex: odontologia prefere azuis/verdes profissionais; pizzaria prefere vermelhos quentes/amarelos; mecânica prefere cinzas escuros/laranjas, etc.).
-    Retorne estritamente um JSON de acordo com o esquema fornecido.`;
+    const prompt = `Você é um diretor de arte e estrategista de vendas de elite.
+Sua missão é criar uma Landing Page ultra-inovadora, de alto padrão comercial e imersiva para a empresa "${businessName}", atuante no nicho de "${niche}" na cidade de "${city}".
+
+DIRETRIZES ANTI-SUPERFICIALIDADE (PROIBIDO TEXTO GENÉRICO DE IA):
+- NUNCA use clichês como "O melhor serviço de...", "Empoderamos o seu negócio", "Atendimento express genérico".
+- Use gatilhos mentais reais e específicos do nicho de ${niche}: dores do cliente, urgência de atendimento, garantia sem letras miúdas, clareza de preço, autoridade técnica.
+- Estruture depoimentos com linguagem natural e humanizada de clientes brasileiros reais.
+- Crie um simulador interativo de orçamento com opções de serviços palpáveis do nicho.
+- Retorne rigorosamente o JSON conforme a estrutura esperada.`;
 
     const response = await ai.models.generateContent({
       model: "gemini-3.8-flash",
@@ -786,43 +1005,106 @@ app.post('/api/generate-site-template', async (req, res) => {
         responseSchema: {
           type: Type.OBJECT,
           properties: {
+            brand: {
+              type: Type.OBJECT,
+              properties: {
+                name: { type: Type.STRING },
+                slogan: { type: Type.STRING },
+                nicheTag: { type: Type.STRING },
+                city: { type: Type.STRING },
+                badge: { type: Type.STRING }
+              },
+              required: ["name", "slogan", "nicheTag", "city", "badge"]
+            },
             colors: {
               type: Type.OBJECT,
               properties: {
-                primary: { type: Type.STRING, description: "Cor primária em formato hex (ex: #1E3A8A)" },
-                secondary: { type: Type.STRING, description: "Cor secundária hex" },
-                accent: { type: Type.STRING, description: "Cor de destaque vibrante para botões de ação hex (ex: #F59E0B)" },
-                bg: { type: Type.STRING, description: "Cor de fundo limpa hex (ex: #F8FAFC)" },
-                text: { type: Type.STRING, description: "Cor de texto principal escuro hex" }
+                primary: { type: Type.STRING, description: "Cor primária marcante hex" },
+                secondary: { type: Type.STRING, description: "Cor secundária de apoio hex" },
+                accent: { type: Type.STRING, description: "Cor de ação vibrante hex para CTAs de conversão" },
+                bg: { type: Type.STRING, description: "Cor de fundo clara hex" },
+                surface: { type: Type.STRING, description: "Cor de superfície dos cartões hex" },
+                text: { type: Type.STRING, description: "Cor de texto principal de alto contraste hex" },
+                darkBg: { type: Type.STRING, description: "Cor para modo escuro imersivo hex" }
               },
-              required: ["primary", "secondary", "accent", "bg", "text"]
+              required: ["primary", "secondary", "accent", "bg", "surface", "text", "darkBg"]
             },
             hero: {
               type: Type.OBJECT,
               properties: {
-                title: { type: Type.STRING, description: "Título impactante da página de entrada" },
-                subtitle: { type: Type.STRING, description: "Subtítulo explicando o valor e benefício da empresa" },
-                ctaText: { type: Type.STRING, description: "Texto de ação principal do botão" }
+                tag: { type: Type.STRING },
+                title: { type: Type.STRING },
+                subtitle: { type: Type.STRING },
+                ctaText: { type: Type.STRING },
+                secondaryCtaText: { type: Type.STRING },
+                trustMetrics: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      value: { type: Type.STRING },
+                      label: { type: Type.STRING }
+                    },
+                    required: ["value", "label"]
+                  }
+                }
               },
-              required: ["title", "subtitle", "ctaText"]
+              required: ["tag", "title", "subtitle", "ctaText", "secondaryCtaText", "trustMetrics"]
+            },
+            interactiveQuote: {
+              type: Type.OBJECT,
+              properties: {
+                title: { type: Type.STRING },
+                subtitle: { type: Type.STRING },
+                options: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      name: { type: Type.STRING },
+                      estimatedPrice: { type: Type.STRING },
+                      highlight: { type: Type.STRING }
+                    },
+                    required: ["name", "estimatedPrice", "highlight"]
+                  }
+                }
+              },
+              required: ["title", "subtitle", "options"]
             },
             about: {
               type: Type.OBJECT,
               properties: {
-                title: { type: Type.STRING, description: "Título da seção Sobre Nós" },
-                text: { type: Type.STRING, description: "Parágrafo persuasivo contando a história e valores da empresa" }
+                title: { type: Type.STRING },
+                text: { type: Type.STRING },
+                highlights: {
+                  type: Type.ARRAY,
+                  items: { type: Type.STRING }
+                }
               },
-              required: ["title", "text"]
+              required: ["title", "text", "highlights"]
             },
             services: {
               type: Type.ARRAY,
               items: {
                 type: Type.OBJECT,
                 properties: {
-                  title: { type: Type.STRING, description: "Nome do serviço prestado" },
-                  description: { type: Type.STRING, description: "Breve explicação sobre os benefícios do serviço" }
+                  title: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                  badge: { type: Type.STRING }
                 },
-                required: ["title", "description"]
+                required: ["title", "description", "badge"]
+              }
+            },
+            showcase: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  title: { type: Type.STRING },
+                  category: { type: Type.STRING },
+                  result: { type: Type.STRING }
+                },
+                required: ["title", "category", "result"]
               }
             },
             testimonials: {
@@ -830,24 +1112,39 @@ app.post('/api/generate-site-template', async (req, res) => {
               items: {
                 type: Type.OBJECT,
                 properties: {
-                  author: { type: Type.STRING, description: "Nome do cliente satisfeito" },
-                  role: { type: Type.STRING, description: "Subtítulo ou ocupação" },
-                  text: { type: Type.STRING, description: "Depoimento convincente" }
+                  author: { type: Type.STRING },
+                  role: { type: Type.STRING },
+                  text: { type: Type.STRING },
+                  rating: { type: Type.INTEGER },
+                  timeAgo: { type: Type.STRING },
+                  verified: { type: Type.BOOLEAN }
                 },
-                required: ["author", "role", "text"]
+                required: ["author", "role", "text", "rating", "timeAgo", "verified"]
+              }
+            },
+            faq: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  question: { type: Type.STRING },
+                  answer: { type: Type.STRING }
+                },
+                required: ["question", "answer"]
               }
             },
             cta: {
               type: Type.OBJECT,
               properties: {
-                title: { type: Type.STRING, description: "Chamada final para ação" },
-                text: { type: Type.STRING, description: "Frase de incentivo final" },
-                buttonText: { type: Type.STRING, description: "Texto do botão de WhatsApp" }
+                title: { type: Type.STRING },
+                text: { type: Type.STRING },
+                buttonText: { type: Type.STRING },
+                urgency: { type: Type.STRING }
               },
-              required: ["title", "text", "buttonText"]
+              required: ["title", "text", "buttonText", "urgency"]
             }
           },
-          required: ["colors", "hero", "about", "services", "testimonials", "cta"]
+          required: ["brand", "colors", "hero", "interactiveQuote", "about", "services", "showcase", "testimonials", "faq", "cta"]
         }
       }
     });
@@ -856,10 +1153,11 @@ app.post('/api/generate-site-template', async (req, res) => {
     const template = JSON.parse(text);
     return res.json({ template, mode: "live" });
   } catch (error: any) {
-    console.error("Error generating website template with Gemini:", error);
-    return res.status(500).json({ error: error.message || "Erro ao gerar modelo de site." });
+    console.warn("Gemini template generation fallback activated:", error.message);
+    return res.json({ template: getUltraRichFallback(), mode: "fallback" });
   }
 });
+
 
 // Pitch/WhatsApp Script Generator API Endpoint
 app.post('/api/generate-pitch', async (req, res) => {
@@ -876,12 +1174,12 @@ app.post('/api/generate-pitch', async (req, res) => {
   if (!ai) {
     // Elegant hardcoded fallback pitch
     const defaultPitch = {
-      whatsapp: `Olá! Sou especialista em aceleração de negócios locais e estava analisando a presença digital da *${business.name}* no Google em ${business.city}.\n\nNotei que vocês oferecem um excelente trabalho, mas hoje *não possuem um site profissional* cadastrado e têm poucas avaliações do Google (apenas ${business.reviewCount} avaliações).\n\nSabia que cerca de 82% das pessoas pesquisam no celular antes de decidir onde ir? Para te ajudar a reverter isso de forma rápida e faturar mais, desenvolvemos duas soluções práticas:\n\n1. 💳 *Placa NFC Inteligente + QR Code*: Seus clientes apenas aproximam o celular e deixam uma avaliação de 5 estrelas em 3 segundos. É física, elegante e aumenta sua reputação na hora.\n2. 🌐 *Site de Alta Conversão*: Um site moderno para destacar seus serviços e colocar você no topo do Google em ${business.city}.\n\nEu criei um *modelo de site demonstrativo para vocês de graça*, e gostaria de te mostrar! Que tal marcarmos um papo rápido de 5 minutos?\n\nQual o melhor dia para você?`,
+      whatsapp: `Olá! Sou especialista em aceleração de negócios locais e estava analisando a presença digital da *${business.name}* no Google em ${business.city}.\n\nNotei que vocês oferecem um excelente trabalho, mas hoje *não possuem um site profissional* cadastrado e têm poucas avaliações do Google (apenas ${business.reviewCount} avaliações).\n\nSabia que cerca de 82% das pessoas pesquisam no celular antes de decidir onde ir? Para te ajudar a reverter isso de forma rápida e faturar mais, desenvolvemos soluções sob medida:\n\n1. 💳 *Placa NFC Inteligente + QR Code (R$ 129,00 - podendo sair a R$ 100,00 na oferta especial)*: Seus clientes apenas aproximam o celular e deixam uma avaliação de 5 estrelas em 3 segundos no balcão.\n2. 🌐 *Site de Alta Conversão (R$ 1.500,00)*: Um site moderno e veloz para colocar vocês no topo das buscas em ${business.city}.\n3. 🚀 *Combo Especial (Placa NFC + Site)*: Tudo por apenas *R$ 1.300,00* (economia de mais de R$ 320,00!).\n\nEu criei um *modelo de site demonstrativo para vocês de graça*, e gostaria de te mostrar! Que tal marcarmos um papo rápido de 5 minutos?\n\nQual o melhor dia para você?`,
       callScript: {
         opening: `Olá! Tudo bem? Por favor, eu poderia falar com o gerente ou responsável pela parte comercial da ${business.name}?`,
-        hook: `Olá! Meu nome é Allan, sou especialista em atração de clientes locais aqui na região. Estava mapeando as empresas de ${business.city} e encontrei o cadastro de vocês no Google Meu Negócio. Vi que vocês têm serviços ótimos, mas notei duas grandes oportunidades que estão fazendo vocês perderem clientes para a concorrência todos os dias: vocês estão sem um site oficial e têm apenas ${business.reviewCount} avaliações de clientes.`,
-        valueProp: `Hoje, as pessoas compram de quem tem mais avaliações e passa mais credibilidade. Eu ajudo empresas como a sua a resolver isso rápido instalando nossa Placa de Avaliação NFC Inteligente — onde o cliente aproxima o celular e avalia em 3 segundos. Além disso, criamos Landing Pages de alta velocidade para garantir que vocês fiquem no topo das pesquisas.`,
-        objections: `Se eles disserem "não tenho interesse" ou "está caro": Diga: "Compreendo perfeitamente. No entanto, pense que apenas um cliente novo que você ganha com nossa solução já paga todo o investimento da Placa NFC e do site. Eu inclusive criei uma simulação visual gratuita de como ficaria a sua Placa NFC e o seu novo site. Posso te enviar sem compromisso no WhatsApp para você dar uma olhada?"`,
+        hook: `Olá! Meu nome é Allan, da ALEF Automações. Estava mapeando as empresas de ${business.city} e encontrei o cadastro de vocês no Google Meu Negócio. Vi que vocês têm serviços ótimos, mas notei duas grandes oportunidades que estão fazendo vocês perderem clientes para a concorrência todos os dias: vocês estão sem um site oficial e têm apenas ${business.reviewCount} avaliações de clientes.`,
+        valueProp: `Hoje, as pessoas compram de quem tem mais avaliações e passa mais credibilidade. Ajudamos empresas locais com a Placa de Avaliação NFC Inteligente (de R$ 129 a R$ 100) — onde o cliente aproxima o celular e avalia em 3 segundos. Também criamos sites profissionais por R$ 1.500, e no nosso combo promocional sai tudo por apenas R$ 1.300.`,
+        objections: `Se eles disserem "não tenho interesse" ou "está caro": Diga: "Compreendo perfeitamente. No entanto, pense que apenas um cliente novo que você ganha com nossa solução já paga todo o investimento do combo de R$ 1.300. Eu inclusive criei uma simulação visual gratuita de como ficaria a sua Placa NFC e o seu novo site. Posso te enviar sem compromisso no WhatsApp para você dar uma olhada?"`,
         closing: `Qual é o seu melhor número de WhatsApp para eu te enviar essas simulações visuais em 2 minutinhos? Assim você avalia se faz sentido para o seu momento de faturamento.`
       }
     };
@@ -890,10 +1188,13 @@ app.post('/api/generate-pitch', async (req, res) => {
 
   try {
     const prompt = `Crie scripts de vendas ultra persuasivos e profissionais para abordar a empresa "${business.name}" (ramo: "${business.niche}", cidade: "${business.city}").
-    Considere as seguintes fraquezas que identificamos: "${business.weakness}". O objetivo é vender para eles o nosso "Combo de Aceleração Local": Placa de Avaliação Google NFC/QR-Code + Site Institucional de Alta Conversão.
+    Considere as seguintes fraquezas que identificamos: "${business.weakness}". O objetivo é vender para eles as soluções da ALEF Automações com nossa tabela oficial:
+    - Placa NFC Inteligente de Avaliação Google: R$ 129,00 (podendo sair a R$ 100,00 em condições promocionais ou pacote)
+    - Criação de Site Institucional de Alta Conversão: R$ 1.500,00
+    - Combo Completo (Placa NFC + Site): R$ 1.300,00 (desconto especial de R$ 329,00!)
     
-    A mensagem de WhatsApp deve ser amigável, direta ao ponto, com emojis sutis para facilitar a leitura e destacar o valor do negócio. Ela deve mencionar que nós já geramos um modelo de site demonstrativo pronto para eles darem uma olhada (gatilho mental da reciprocidade).
-    O script de ligação por telefone deve conter as etapas estruturadas de abertura, conexão/problema, proposta de valor, contorno de objeções e fechamento comercial.
+    A mensagem de WhatsApp deve ser amigável, direta ao ponto, com emojis sutis para facilitar a leitura e destacar o valor do negócio. Ela deve mencionar que nós já geramos um modelo de site demonstrativo pronto para eles darem uma olhada (gatilho mental da reciprocidade) e apresentar as opções de investimento de forma clara.
+    O script de ligação por telefone deve conter as etapas estruturadas de abertura, conexão/problema, proposta de valor com os preços, contorno de objeções e fechamento comercial.
     Retorne estritamente um JSON de acordo com o esquema de resposta fornecido.`;
 
     const response = await ai.models.generateContent({
