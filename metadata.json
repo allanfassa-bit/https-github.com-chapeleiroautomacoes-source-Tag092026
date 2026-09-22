@@ -1,0 +1,6 @@
+{
+  "name": "ALF Automação - GMB Sales Engine",
+  "description": "Sistema de inteligência de vendas locais para prospectar empresas sem site e com baixas avaliações, gerando modelos de placas NFC/QR-Code, landing pages interativas e scripts de WhatsApp de alta conversão.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

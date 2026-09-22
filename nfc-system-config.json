@@ -1,0 +1,55 @@
+{
+  "system_name": "ALF Automação GMB & NFC SaaS Engine",
+  "version": "1.1.0",
+  "security_level": "CyberShield Tier 3",
+  "database": {
+    "provider": "Firebase Firestore",
+    "database_id": "ai-studio-alfautomaogmbsal-702a33aa-2f38-4afe-9ac9-5641b8c276cd",
+    "collections": {
+      "leads": {
+        "key_identifier": "id",
+        "custom_saas_fields": [
+          "nfcPassword",
+          "nfcRedirectActive",
+          "nfcCustomUrl",
+          "nfcInstagramUrl",
+          "nfcWhatsappNum",
+          "nfcWhatsappMsg",
+          "nfcBillingStatus",
+          "nfcModulesAllowed"
+        ]
+      }
+    }
+  },
+  "endpoints": {
+    "redirection_endpoint": {
+      "path": "/r/:leadId",
+      "method": "GET",
+      "auth_required": false,
+      "checks": [
+        "Parameter sanitization for regex [^a-zA-Z0-9_\\-]",
+        "Subscription validation with nfcBillingStatus check",
+        "Protocol security check strictly for http and https"
+      ]
+    },
+    "lead_prospecting": {
+      "path": "/api/prospect",
+      "method": "POST",
+      "input_auditing": "GMB CyberShield Guard against Prompt Injection & XSS"
+    },
+    "gmb_pitch_generator": {
+      "path": "/api/generate-pitch",
+      "method": "POST",
+      "llm_engine": "Gemini 3.5 Flash"
+    }
+  },
+  "client_portal": {
+    "auth_type": "PIN code credentials",
+    "responsive_targets": [
+      "smartphones (iPhone, Android)",
+      "tablets",
+      "desktops"
+    ],
+    "pwa_compliant": true
+  }
+}

@@ -1,0 +1,65 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 1: Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions for validation (Pillars 3 & 10)
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-_]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Pillar 2 & 5: Validation Blueprint
+    function isValidLead(data) {
+      return data.keys().hasAll(['id', 'name', 'niche', 'city', 'stage'])
+        && data.keys().hasOnly([
+          'id', 'name', 'address', 'phone', 'rating', 'reviewCount', 
+          'hasWebsite', 'websiteUrl', 'googleMapsUrl', 'niche', 'city', 'weakness', 
+          'stage', 'saleValue', 'productType', 'isGoogleRegistered', 
+          'googleReviewsStatus', 'approachSite', 'approachNfc', 
+          'approachMiniSite', 'nextFollowUp', 'historyNotes',
+          'nfcPassword', 'nfcRedirectActive', 'nfcCustomUrl', 'nfcInstagramUrl', 
+          'nfcWhatsappNum', 'nfcWhatsappMsg', 'nfcBillingStatus', 'nfcModulesAllowed'
+        ])
+        && data.id is string && data.id.size() <= 128
+        && data.name is string && data.name.size() <= 256
+        && data.niche is string && data.niche.size() <= 128
+        && data.city is string && data.city.size() <= 128
+        && data.stage is string && data.stage.size() <= 64
+        && (data.get('phone', '') is string && data.get('phone', '').size() <= 64)
+        && (data.get('address', '') is string && data.get('address', '').size() <= 512)
+        && (data.get('weakness', '') is string && data.get('weakness', '').size() <= 1024)
+        && (data.get('googleReviewsStatus', '') is string && data.get('googleReviewsStatus', '').size() <= 512)
+        && (data.get('approachSite', '') is string && data.get('approachSite', '').size() <= 2048)
+        && (data.get('approachNfc', '') is string && data.get('approachNfc', '').size() <= 2048)
+        && (data.get('approachMiniSite', '') is string && data.get('approachMiniSite', '').size() <= 2048)
+        && (data.get('nextFollowUp', '') is string && data.get('nextFollowUp', '').size() <= 32)
+        && (!data.keys().contains('nfcPassword') || data.nfcPassword is string)
+        && (!data.keys().contains('nfcRedirectActive') || data.nfcRedirectActive is string)
+        && (!data.keys().contains('nfcCustomUrl') || data.nfcCustomUrl is string)
+        && (!data.keys().contains('nfcInstagramUrl') || data.nfcInstagramUrl is string)
+        && (!data.keys().contains('nfcWhatsappNum') || data.nfcWhatsappNum is string)
+        && (!data.keys().contains('nfcWhatsappMsg') || data.nfcWhatsappMsg is string)
+        && (!data.keys().contains('nfcBillingStatus') || data.nfcBillingStatus is string);
+    }
+
+    // Leads collection rules
+    match /leads/{leadId} {
+      allow get: if true;
+      allow list: if true;
+      allow create: if isValidId(leadId) && isValidLead(incoming()) && incoming().id == leadId;
+      allow update: if isValidId(leadId) && isValidLead(incoming()) && incoming().id == leadId;
+      allow delete: if isValidId(leadId);
+    }
+  }
+}

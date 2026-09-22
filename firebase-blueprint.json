@@ -1,0 +1,102 @@
+{
+  "entities": {
+    "Lead": {
+      "title": "Lead",
+      "description": "Representa um lead prospectado do Google Meu Negócio no funil de vendas da ALF Automação.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "ID único do lead"
+        },
+        "name": {
+          "type": "string",
+          "description": "Nome da empresa"
+        },
+        "address": {
+          "type": "string",
+          "description": "Endereço físico"
+        },
+        "phone": {
+          "type": "string",
+          "description": "Telefone ou celular"
+        },
+        "rating": {
+          "type": "number",
+          "description": "Nota média do Google (0-5)"
+        },
+        "reviewCount": {
+          "type": "integer",
+          "description": "Quantidade de avaliações"
+        },
+        "hasWebsite": {
+          "type": "boolean",
+          "description": "Indica se já possui site"
+        },
+        "googleMapsUrl": {
+          "type": "string",
+          "description": "Link do Google Maps"
+        },
+        "niche": {
+          "type": "string",
+          "description": "Nicho ou segmento da empresa"
+        },
+        "city": {
+          "type": "string",
+          "description": "Cidade da empresa"
+        },
+        "weakness": {
+          "type": "string",
+          "description": "Principal fragilidade digital identificada"
+        },
+        "stage": {
+          "type": "string",
+          "description": "Fase atual do lead no Kanban comercial"
+        },
+        "saleValue": {
+          "type": "number",
+          "description": "Valor estimado de venda"
+        },
+        "productType": {
+          "type": "string",
+          "description": "Tipo de produto oferecido para prospecção"
+        },
+        "isGoogleRegistered": {
+          "type": "boolean",
+          "description": "Indica se a empresa está registrada/reivindicada no GMB"
+        },
+        "googleReviewsStatus": {
+          "type": "string",
+          "description": "Status analítico curto das avaliações do Google"
+        },
+        "approachSite": {
+          "type": "string",
+          "description": "Roteiro/dica de abordagem para venda de site modelo"
+        },
+        "approachNfc": {
+          "type": "string",
+          "description": "Roteiro/dica de abordagem para venda de placa NFC"
+        },
+        "approachMiniSite": {
+          "type": "string",
+          "description": "Roteiro/dica de abordagem para venda de mini-site"
+        },
+        "nextFollowUp": {
+          "type": "string",
+          "description": "Data do próximo acompanhamento (formato AAAA-MM-DD)"
+        },
+        "historyNotes": {
+          "type": "array",
+          "description": "Histórico de anotações e contatos realizados com o lead"
+        }
+      },
+      "required": ["id", "name", "niche", "city", "stage"]
+    }
+  },
+  "firestore": {
+    "leads": {
+      "schema": "Lead",
+      "description": "Coleção de leads e oportunidades comerciais do sistema ALF Automação."
+    }
+  }
+}

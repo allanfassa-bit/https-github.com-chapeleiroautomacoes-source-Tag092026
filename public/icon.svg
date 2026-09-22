@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Dark slate gradient with deep blue tone -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#020617" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+    
+    <!-- Metallic cyan/blue glow -->
+    <linearGradient id="glowGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#06b6d4" />
+      <stop offset="50%" stop-color="#3b82f6" />
+      <stop offset="100%" stop-color="#60a5fa" />
+    </linearGradient>
+
+    <!-- Metal face gradient -->
+    <linearGradient id="metalGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="50%" stop-color="#cbd5e1" />
+      <stop offset="100%" stop-color="#64748b" />
+    </linearGradient>
+
+    <!-- Deep neon shadow -->
+    <filter id="neonGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="12" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background rounded card -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)" />
+  <rect x="12" y="12" width="488" height="488" rx="100" fill="none" stroke="#1e293b" stroke-width="6" />
+
+  <!-- Glowing neon core -->
+  <g filter="url(#neonGlow)">
+    <!-- Elegant stylized A -->
+    <path d="M100 360 L200 160 L240 160 L140 360 Z" fill="url(#glowGrad)" opacity="0.4" />
+    <path d="M110 350 L195 180 L210 180 L125 350 Z" fill="url(#metalGrad)" />
+    <path d="M190 180 L275 350 L260 350 L175 180 Z" fill="url(#metalGrad)" />
+    <path d="M140 300 H230" stroke="url(#glowGrad)" stroke-width="12" stroke-linecap="round" />
+
+    <!-- Elegant stylized L -->
+    <path d="M260 160 H285 V325 H380 V350 H260 Z" fill="url(#metalGrad)" />
+    <path d="M260 325 H380 V350 H260 Z" fill="url(#glowGrad)" opacity="0.6" />
+
+    <!-- Elegant stylized F -->
+    <path d="M370 160 H470 V185 H395 V245 H460 V270 H395 V350 H370 Z" fill="url(#metalGrad)" />
+    <path d="M370 160 H470 V185 H370 Z" fill="url(#glowGrad)" opacity="0.6" />
+    <path d="M370 245 H460 V270 H370 Z" fill="url(#glowGrad)" opacity="0.4" />
+  </g>
+
+  <!-- Subtle grid pattern in background -->
+  <circle cx="256" cy="256" r="220" fill="none" stroke="url(#glowGrad)" stroke-width="2" opacity="0.15" stroke-dasharray="10 15" />
+</svg>
