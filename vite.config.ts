@@ -6,7 +6,7 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig(() => {
   return {
-    base: './',
+    base: '/',
     plugins: [
       react(), 
       tailwindcss(),
@@ -39,7 +39,10 @@ export default defineConfig(() => {
           ]
         },
         workbox: {
+          maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+          navigateFallback: '/index.html',
+          navigateFallbackDenylist: [/^\/(r|redirect|qr|p|nfc|tag|l|m|minisite|cardapio|c|menu|api)(\/|$)/i],
           runtimeCaching: [
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
@@ -63,9 +66,36 @@ export default defineConfig(() => {
         },
       })
     ],
+    build: {
+      chunkSizeWarningLimit: 1000,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('node_modules')) {
+              if (id.includes('react') || id.includes('react-dom')) {
+                return 'vendor-react';
+              }
+              if (id.includes('lucide-react')) {
+                return 'vendor-lucide';
+              }
+              if (id.includes('recharts') || id.includes('motion')) {
+                return 'vendor-viz';
+              }
+              if (id.includes('firebase')) {
+                return 'vendor-firebase';
+              }
+              if (id.includes('jszip') || id.includes('qrcode')) {
+                return 'vendor-utils';
+              }
+              return 'vendor-misc';
+            }
+          }
+        }
+      }
+    },
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        '@': path.resolve(process.cwd(), '.'),
       },
     },
     server: {

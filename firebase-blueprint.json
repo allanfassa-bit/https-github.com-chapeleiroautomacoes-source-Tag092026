@@ -88,15 +88,209 @@
         "historyNotes": {
           "type": "array",
           "description": "Histórico de anotações e contatos realizados com o lead"
+        },
+        "portalUsername": {
+          "type": "string",
+          "description": "Nome de usuário personalizado para o lojista acessar o portal do cliente"
+        },
+        "nfcPassword": {
+          "type": "string",
+          "description": "Senha ou PIN numérico de acesso ao portal do cliente"
+        },
+        "totalScans": {
+          "type": "integer",
+          "description": "Total acumulado de leituras efetuadas na placa NFC ou QR Code"
+        },
+        "lastScanAt": {
+          "type": "string",
+          "description": "Data e hora do último acesso registrado na placa"
         }
       },
       "required": ["id", "name", "niche", "city", "stage"]
+    },
+    "AccessLog": {
+      "title": "AccessLog",
+      "description": "Registro de leitura de placa NFC ou escaneamento de QR Code dinâmico.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "ID único do log de acesso"
+        },
+        "leadId": {
+          "type": "string",
+          "description": "ID do lead / placa escaneada"
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "Data e hora ISO do escaneamento"
+        },
+        "date": {
+          "type": "string",
+          "description": "Data no formato brasileiro DD/MM/AAAA"
+        },
+        "time": {
+          "type": "string",
+          "description": "Hora no formato HH:mm:ss"
+        },
+        "device": {
+          "type": "string",
+          "description": "Dispositivo que realizou a leitura (ex: Smartphone NFC/QR)"
+        },
+        "location": {
+          "type": "string",
+          "description": "Localização aproximada da leitura"
+        }
+      },
+      "required": ["leadId", "timestamp", "date"]
+    },
+    "SystemUser": {
+      "title": "SystemUser",
+      "description": "Usuário com credenciais criptografadas e perfil de acesso restrito ao painel.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Nome de usuário normalizado em minúsculas (chave primária)"
+        },
+        "username": {
+          "type": "string",
+          "description": "Nome de usuário para login"
+        },
+        "name": {
+          "type": "string",
+          "description": "Nome completo do usuário"
+        },
+        "role": {
+          "type": "string",
+          "description": "Nível de privilégios (master, operator, support, client)"
+        },
+        "passwordHash": {
+          "type": "string",
+          "description": "Hash criptográfico seguro da senha com salt"
+        },
+        "salt": {
+          "type": "string",
+          "description": "Salt criptográfico aleatório gerado para a senha"
+        },
+        "active": {
+          "type": "boolean",
+          "description": "Indica se o acesso do usuário está ativo ou revogado"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Data de cadastro do usuário"
+        },
+        "lastLoginAt": {
+          "type": "string",
+          "description": "Data do último login efetuado com sucesso"
+        }
+      },
+      "required": ["id", "username", "name", "role", "passwordHash", "salt", "active"]
+    },
+    "LoginAttempt": {
+      "title": "LoginAttempt",
+      "description": "Registro de controle contra ataques de força bruta com bloqueio de 2 minutos após 3 falhas.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Identificador do usuário ou IP do atacante"
+        },
+        "attempts": {
+          "type": "integer",
+          "description": "Número de tentativas incorretas consecutivas"
+        },
+        "lastAttemptAt": {
+          "type": "string",
+          "description": "Data e hora ISO da última tentativa falha"
+        },
+        "lockedUntil": {
+          "type": "string",
+          "description": "Data e hora ISO até quando o login está bloqueado (2 minutos)"
+        }
+      },
+      "required": ["id", "attempts", "lastAttemptAt"]
+    },
+    "Seller": {
+      "title": "Seller",
+      "description": "Vendedor ou parceiro comercial cadastrado com CPF, telefone, email e controle de acesso Master.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Nome de usuário normalizado (chave primária)"
+        },
+        "username": {
+          "type": "string",
+          "description": "Login de acesso"
+        },
+        "name": {
+          "type": "string",
+          "description": "Nome completo do vendedor ou parceiro"
+        },
+        "cpf": {
+          "type": "string",
+          "description": "CPF do vendedor (apenas números ou formatado)"
+        },
+        "email": {
+          "type": "string",
+          "description": "E-mail de contato"
+        },
+        "phone": {
+          "type": "string",
+          "description": "Telefone ou WhatsApp de contato"
+        },
+        "role": {
+          "type": "string",
+          "description": "Papel comercial (seller, reseller, affiliate)"
+        },
+        "vendorCode": {
+          "type": "string",
+          "description": "Código identificador exclusivo do vendedor"
+        },
+        "active": {
+          "type": "boolean",
+          "description": "Status de liberação ou bloqueio pelo Master"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Data ISO de cadastro"
+        },
+        "lastLoginAt": {
+          "type": "string",
+          "description": "Data ISO do último login"
+        }
+      },
+      "required": ["id", "username", "name", "cpf", "email", "phone", "role", "active"]
     }
   },
   "firestore": {
     "leads": {
       "schema": "Lead",
-      "description": "Coleção de leads e oportunidades comerciais do sistema ALF Automação."
+      "description": "Coleção de leads e oportunidades comerciais do sistema ALF Automação.",
+      "subcollections": {
+        "acessos": {
+          "schema": "AccessLog",
+          "description": "Subcoleção com histórico de cada leitura da tag NFC ou QR Code do cliente."
+        }
+      }
+    },
+    "lead_access_logs": {
+      "schema": "AccessLog",
+      "description": "Histórico de monitoramento de acessos e leituras de tags NFC e QR Codes."
+    },
+    "system_users": {
+      "schema": "SystemUser",
+      "description": "Usuários autenticados do sistema com perfis RBAC restritos."
+    },
+    "login_attempts": {
+      "schema": "LoginAttempt",
+      "description": "Controle e bloqueio contra ataques de força bruta."
+    },
+    "sellers": {
+      "schema": "Seller",
+      "description": "Tabela de vendedores e parceiros comerciais com controle confidencial exclusivo do usuário Master."
     }
   }
 }

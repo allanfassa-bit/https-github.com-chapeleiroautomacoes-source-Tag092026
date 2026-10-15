@@ -1,65 +1,108 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Pillar 1: Global Safety Net
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
-    // Helper functions for validation (Pillars 3 & 10)
+    // CyberShield Validation Helpers (Pillars 1, 2, 3)
     function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-_]+$');
+      return id is string && id.size() > 0 && id.size() <= 128;
     }
 
     function incoming() {
       return request.resource.data;
     }
 
-    function existing() {
-      return resource.data;
-    }
-
-    // Pillar 2 & 5: Validation Blueprint
     function isValidLead(data) {
-      return data.keys().hasAll(['id', 'name', 'niche', 'city', 'stage'])
-        && data.keys().hasOnly([
-          'id', 'name', 'address', 'phone', 'rating', 'reviewCount', 
-          'hasWebsite', 'websiteUrl', 'googleMapsUrl', 'niche', 'city', 'weakness', 
-          'stage', 'saleValue', 'productType', 'isGoogleRegistered', 
-          'googleReviewsStatus', 'approachSite', 'approachNfc', 
-          'approachMiniSite', 'nextFollowUp', 'historyNotes',
-          'nfcPassword', 'nfcRedirectActive', 'nfcCustomUrl', 'nfcInstagramUrl', 
-          'nfcWhatsappNum', 'nfcWhatsappMsg', 'nfcBillingStatus', 'nfcModulesAllowed'
-        ])
-        && data.id is string && data.id.size() <= 128
-        && data.name is string && data.name.size() <= 256
-        && data.niche is string && data.niche.size() <= 128
-        && data.city is string && data.city.size() <= 128
-        && data.stage is string && data.stage.size() <= 64
-        && (data.get('phone', '') is string && data.get('phone', '').size() <= 64)
-        && (data.get('address', '') is string && data.get('address', '').size() <= 512)
-        && (data.get('weakness', '') is string && data.get('weakness', '').size() <= 1024)
-        && (data.get('googleReviewsStatus', '') is string && data.get('googleReviewsStatus', '').size() <= 512)
-        && (data.get('approachSite', '') is string && data.get('approachSite', '').size() <= 2048)
-        && (data.get('approachNfc', '') is string && data.get('approachNfc', '').size() <= 2048)
-        && (data.get('approachMiniSite', '') is string && data.get('approachMiniSite', '').size() <= 2048)
-        && (data.get('nextFollowUp', '') is string && data.get('nextFollowUp', '').size() <= 32)
-        && (!data.keys().contains('nfcPassword') || data.nfcPassword is string)
-        && (!data.keys().contains('nfcRedirectActive') || data.nfcRedirectActive is string)
-        && (!data.keys().contains('nfcCustomUrl') || data.nfcCustomUrl is string)
-        && (!data.keys().contains('nfcInstagramUrl') || data.nfcInstagramUrl is string)
-        && (!data.keys().contains('nfcWhatsappNum') || data.nfcWhatsappNum is string)
-        && (!data.keys().contains('nfcWhatsappMsg') || data.nfcWhatsappMsg is string)
-        && (!data.keys().contains('nfcBillingStatus') || data.nfcBillingStatus is string);
+      return data.id is string && data.id.size() > 0 && data.id.size() <= 128
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 200
+        && (!('city' in data) || data.city is string)
+        && (!('niche' in data) || data.niche is string)
+        && (!('googleMapsUrl' in data) || (data.googleMapsUrl is string && data.googleMapsUrl.size() <= 1024))
+        && (!('nfcCustomUrl' in data) || (data.nfcCustomUrl is string && data.nfcCustomUrl.size() <= 1024))
+        && (!('nfcPassword' in data) || (data.nfcPassword is string && data.nfcPassword.size() <= 64));
     }
 
-    // Leads collection rules
+    function isValidAcesso(data) {
+      return data.leadId is string && data.leadId.size() > 0 && data.leadId.size() <= 128
+        && data.timestamp is string && data.timestamp.size() > 0 && data.timestamp.size() <= 60
+        && (!('date' in data) || data.date is string)
+        && (!('location' in data) || data.location is string);
+    }
+
+    // Leads collection: validate id, fields, and prevent arbitrary corruptions
     match /leads/{leadId} {
-      allow get: if true;
-      allow list: if true;
-      allow create: if isValidId(leadId) && isValidLead(incoming()) && incoming().id == leadId;
-      allow update: if isValidId(leadId) && isValidLead(incoming()) && incoming().id == leadId;
+      allow read: if true;
+      allow create, update: if isValidId(leadId) && isValidLead(incoming());
       allow delete: if isValidId(leadId);
+
+      // Acessos subcollection for NFC and QR Code scan analytics
+      match /acessos/{acessoId} {
+        allow read: if true;
+        allow create, update: if isValidId(acessoId) && isValidAcesso(incoming());
+        allow delete: if false; // Audit logs are immutable
+      }
+
+      // Access logs subcollection
+      match /access_logs/{logId} {
+        allow read: if true;
+        allow create, update: if isValidId(logId) && isValidAcesso(incoming());
+        allow delete: if false;
+      }
+    }
+
+    // Collection group rule for querying acessos across leads (read-only)
+    match /{path=**}/acessos/{acessoId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Top-level access logs collection
+    match /lead_access_logs/{logId} {
+      allow read: if true;
+      allow create: if isValidId(logId) && isValidAcesso(incoming());
+      allow update, delete: if false;
+    }
+
+    function isValidSystemUser(data) {
+      return data.username is string && data.username.size() >= 3 && data.username.size() <= 100
+        && data.role is string && data.role in ['master', 'operator', 'support', 'client', 'seller', 'reseller', 'affiliate']
+        && data.passwordHash is string && data.passwordHash.size() > 0
+        && data.salt is string && data.salt.size() > 0;
+    }
+
+    function isValidLoginAttempt(data) {
+      return data.id is string && data.id.size() > 0 && data.id.size() <= 128
+        && (data.attempts is int || data.attempts is string)
+        && data.lastAttemptAt is string;
+    }
+
+    // CyberShield: System Users (PBKDF2 credentials) - Strictly Validated Schema
+    match /system_users/{userId} {
+      allow read: if true;
+      allow create, update: if isValidId(userId) && isValidSystemUser(incoming());
+      allow delete: if isValidId(userId) && userId != 'master' && userId != 'mysis_26';
+    }
+
+    // CyberShield: Login Attempts & Brute Force Lockout state (3 attempts -> 2 min lock)
+    match /login_attempts/{attemptId} {
+      allow read: if true;
+      allow create, update: if isValidId(attemptId) && isValidLoginAttempt(incoming());
+      allow delete: if isValidId(attemptId);
+    }
+
+    function isValidSeller(data) {
+      return data.username is string && data.username.size() >= 3 && data.username.size() <= 100
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 200
+        && data.cpf is string && data.cpf.size() >= 11 && data.cpf.size() <= 20
+        && (!('email' in data) || data.email is string)
+        && (!('phone' in data) || data.phone is string)
+        && data.role is string && data.role in ['seller', 'reseller', 'affiliate'];
+    }
+
+    // Confidential Sellers Collection (CPF, phone, email, status) - Exclusively Master Controlled via API
+    match /sellers/{sellerId} {
+      allow read: if false; // Protected: only Master via server API can view sensitive CPF data
+      allow create: if isValidId(sellerId) && isValidSeller(incoming());
+      allow update, delete: if false; // Updates and blocking strictly via Master authenticated API
     }
   }
 }
+

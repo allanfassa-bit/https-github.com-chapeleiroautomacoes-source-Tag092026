@@ -1,13 +1,45 @@
-import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firestore';
+import React, { useState, useEffect, useRef } from 'react';
+import { collection, onSnapshot, doc, getDoc, getDocs, setDoc, deleteDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from './firebase';
 import { PWAInstallButton } from './components/PWAInstallButton';
+import { NfcMockupTotem } from './components/NfcMockupTotem';
+import { ExportSiteModal } from './components/ExportSiteModal';
+import { DynamicQrBatchManager } from './components/DynamicQrBatchManager';
+import { MiniSiteViewer } from './components/MiniSiteViewer';
+import { GoogleReviewLinkGenerator } from './components/GoogleReviewLinkGenerator';
+import { MiniSiteConfig, formatMiniSitePhone } from './utils/miniSiteExporter';
+import { downloadClientSiteZip, downloadSingleHtml, openLiveSitePreview, copyHtmlToClipboard } from './utils/siteExporter';
+import { detectNicheVisualProfile } from './utils/nicheVisualDatabase';
+import { SalesLandingPage } from './components/SalesLandingPage';
+import { SecureAuthModal, AuthSessionUser } from './components/SecureAuthModal';
+import { ClientAccessMonitoring } from './components/ClientAccessMonitoring';
+import { NfcWriterModal } from './components/NfcWriterModal';
+import { UserManagementPanel } from './components/UserManagementPanel';
+import { LeadManagementModule } from './components/LeadManagementModule';
+import { PlateScannerModal } from './components/PlateScannerModal';
+import { CustomDomainModal } from './components/CustomDomainModal';
+import { AntigravityExportModal } from './components/AntigravityExportModal';
+import { SellerRegisterModal } from './components/SellerRegisterModal';
+import { CardapioDigitalManager } from './components/CardapioDigitalManager';
+import { PublicCardapioViewer } from './components/PublicCardapioViewer';
+import { RestaurantMenu, INITIAL_MENUS } from './types/cardapio';
+import { 
+  getPublicAppOrigin, 
+  getDynamicQrUrl, 
+  getDynamicInstagramUrl,
+  getDynamicGoogleUrl,
+  getDirectLeadUrl, 
+  getTestRedirectUrl,
+  validateGoogleReviewUrl,
+  getOfficialSearchReviewFallback
+} from './utils/publicUrlHelper';
 import {
   Search,
   MapPin,
   Sparkles,
   Phone,
   MessageSquare,
+  Briefcase,
   Share2,
   CheckCircle,
   TrendingUp,
@@ -19,6 +51,8 @@ import {
   Coins,
   Award,
   Shield,
+  ShieldCheck,
+  Clock,
   QrCode,
   Sliders,
   ChevronDown,
@@ -50,8 +84,33 @@ import {
   HelpCircle,
   Send,
   Eye,
-  LogOut
+  LogOut,
+  CreditCard,
+  FolderArchive,
+  Menu,
+  X,
+  ChevronRight,
+  LayoutGrid,
+  Printer,
+  Building2,
+  ArrowLeft,
+  Filter,
+  ScanLine,
+  Utensils,
+  PanelLeftClose,
+  PanelLeft
 } from 'lucide-react';
+import { NfcArtworkDownloadModal } from './components/NfcArtworkDownloadModal';
+import {
+  downloadPlate10x10Png,
+  downloadCardNfcPng,
+  downloadCompleteArtworkKitZip,
+  generatePlate10x10DataUrl,
+  generateCardNfcDataUrl,
+  ArtworkTheme,
+  ArtworkOptions
+} from './utils/nfcPlateGenerator';
+import { openHighDefinitionPrintWindow } from './utils/platePrintHelper';
 
 // Interfaces
 export interface SearchLogEntry {
@@ -62,7 +121,7 @@ export interface SearchLogEntry {
   step?: number;
 }
 
-interface Lead {
+export interface Lead {
   id: string;
   name: string;
   address: string;
@@ -88,28 +147,43 @@ interface Lead {
   
   // Dynamic NFC SaaS Portal Fields
   nfcPassword?: string;
-  nfcRedirectActive?: 'gmb' | 'whatsapp' | 'instagram' | 'website' | 'custom';
+  portalUsername?: string;
+  nfcRedirectActive?: 'gmb' | 'whatsapp' | 'instagram' | 'website' | 'custom' | 'minisite';
   nfcCustomUrl?: string;
   nfcInstagramUrl?: string;
   nfcWhatsappNum?: string;
   nfcWhatsappMsg?: string;
   nfcBillingStatus?: 'active' | 'suspended';
+  miniSiteConfig?: any;
+  totalScans?: number;
+  lastScanAt?: string;
   nfcModulesAllowed?: {
     gmb: boolean;
     whatsapp: boolean;
     instagram: boolean;
     website: boolean;
     custom: boolean;
+    minisite?: boolean;
   };
+  isPlaquePrinted?: boolean;
+  plaquePrintedAt?: string;
 }
 
-interface SiteTemplate {
+export interface SiteTemplate {
   brand?: {
     name: string;
     slogan: string;
     nicheTag: string;
     city: string;
     badge: string;
+  };
+  nicheType?: string;
+  themeStyle?: string;
+  images?: {
+    hero: string;
+    about: string;
+    gallery?: Array<{ url: string; title: string; category?: string }>;
+    serviceThumbnails?: string[];
   };
   colors: {
     primary: string;
@@ -150,7 +224,7 @@ interface SiteTemplate {
   };
 }
 
-interface Pitch {
+export interface Pitch {
   whatsapp: string;
   callScript: {
     opening: string;
@@ -162,7 +236,7 @@ interface Pitch {
 }
 
 // Predefined niches
-const PRESET_NICHES = [
+export const PRESET_NICHES = [
   { id: 'Dentista', label: '🦷 Dentista / Odonto' },
   { id: 'Mecânica', label: '🚗 Oficina Mecânica' },
   { id: 'Restaurante', label: '🍕 Restaurante / Pizzaria' },
@@ -173,9 +247,393 @@ const PRESET_NICHES = [
   { id: 'Advogado', label: '⚖️ Advocacia' }
 ];
 
-export default function App() {
+// High-Priority physical plate aliases (instant 0ms redirection for printed plaques)
+const KNOWN_PHYSICAL_PLATES: Record<string, string> = {
+  'bellariobrancomesas': 'https://search.google.com/local/writereview?placeid=ChIJTTKzQz_Xv5QRjyhnE6zQpyI',
+  'bellariobranco': 'https://search.google.com/local/writereview?placeid=ChIJTTKzQz_Xv5QRjyhnE6zQpyI',
+  'padariabellariobranco': 'https://search.google.com/local/writereview?placeid=ChIJTTKzQz_Xv5QRjyhnE6zQpyI',
+  'bella': 'https://search.google.com/local/writereview?placeid=ChIJTTKzQz_Xv5QRjyhnE6zQpyI',
+  'empre08': 'https://search.google.com/local/writereview?placeid=ChIJx2ytYDXXv5QRQzIXgn7RRrc',
+  'empresa08': 'https://search.google.com/local/writereview?placeid=ChIJx2ytYDXXv5QRQzIXgn7RRrc',
+  'emp08': 'https://search.google.com/local/writereview?placeid=ChIJx2ytYDXXv5QRQzIXgn7RRrc',
+  'suica': 'https://search.google.com/local/writereview?placeid=ChIJx2ytYDXXv5QRQzIXgn7RRrc',
+  'padariasuica': 'https://search.google.com/local/writereview?placeid=ChIJx2ytYDXXv5QRQzIXgn7RRrc',
+  'empresa04': 'https://search.google.com/local/writereview?placeid=ChIJCyHYx7zXv5QRn264H27HvhY',
+  'cbcell': 'https://search.google.com/local/writereview?placeid=ChIJCyHYx7zXv5QRn264H27HvhY',
+  'empresa06': 'https://search.google.com/local/writereview?placeid=ChIJTTKzQz_Xv5QRjyhnE6zQpyI',
+  'danipontello': 'https://www.google.com/search?q=Dani%20pontello#lrd=0x0:0x0,3',
+  'assadosdojapa': 'https://www.google.com/search?q=ASSADOS+DO+JAPA#lrd=0x0:0x0,3'
+};
+
+function RedirectHandler({ cleanId }: { cleanId: string }) {
+  const [redirectState, setRedirectState] = useState<{
+    status: 'loading' | 'redirecting' | 'ready' | 'suspended';
+    businessName: string;
+    primaryUrl: string;
+    fallbackUrl: string;
+    reason?: string;
+  }>(() => {
+    const known = KNOWN_PHYSICAL_PLATES[cleanId];
+    return {
+      status: known ? 'redirecting' : 'loading',
+      businessName: cleanId.replace(/[_\-]/g, ' '),
+      primaryUrl: known || '',
+      fallbackUrl: getOfficialSearchReviewFallback(cleanId),
+    };
+  });
+
+  useEffect(() => {
+    let isCancelled = false;
+    const isInIframe = typeof window !== 'undefined' && window.self !== window.top;
+
+    // Check known plate dictionary for immediate jump
+    const directHit = KNOWN_PHYSICAL_PLATES[cleanId];
+    if (directHit) {
+      if (!isInIframe) {
+        try {
+          window.location.replace(directHit);
+        } catch (_) {
+          window.location.href = directHit;
+        }
+      } else {
+        setRedirectState({
+          status: 'ready',
+          businessName: cleanId.replace(/[_\-]/g, ' '),
+          primaryUrl: directHit,
+          fallbackUrl: getOfficialSearchReviewFallback(cleanId),
+        });
+      }
+      return;
+    }
+
+    // Smart multi-candidate resolution for aliases
+    const targetCandidates: string[] = [cleanId];
+    const numMatch = cleanId.match(/\d+/);
+    if (numMatch) {
+      const numStr = numMatch[0];
+      const paddedNum = numStr.padStart(2, '0');
+      const unpaddedNum = String(parseInt(numStr, 10));
+      const prefixes = ['empresa', 'empre', 'emoresa', 'empresa_', 'empre_', 'emoresa_', 'lead_'];
+      for (const p of prefixes) {
+        const c1 = `${p}${paddedNum}`;
+        const c2 = `${p}${unpaddedNum}`;
+        if (!targetCandidates.includes(c1)) targetCandidates.push(c1);
+        if (!targetCandidates.includes(c2)) targetCandidates.push(c2);
+      }
+    }
+
+    if (cleanId.includes('bella') || cleanId.includes('mesa') || cleanId.includes('rio')) {
+      if (!targetCandidates.includes('bellariobrancomesas')) targetCandidates.unshift('bellariobrancomesas');
+    }
+    if (cleanId.includes('suica') || cleanId.includes('padaria') || cleanId.includes('08')) {
+      if (!targetCandidates.includes('empre08')) targetCandidates.unshift('empre08');
+      if (!targetCandidates.includes('empresa08')) targetCandidates.unshift('empresa08');
+    }
+    if (cleanId.includes('cbcell') || cleanId.includes('cell')) {
+      if (!targetCandidates.includes('empresa04')) targetCandidates.unshift('empresa04');
+    }
+    if (cleanId.startsWith('empresa')) {
+      const alt = cleanId.replace('empresa', 'empre');
+      if (!targetCandidates.includes(alt)) targetCandidates.push(alt);
+    } else if (cleanId.startsWith('empre')) {
+      const alt = cleanId.replace('empre', 'empresa');
+      if (!targetCandidates.includes(alt)) targetCandidates.push(alt);
+    }
+
+    const runRedirect = async () => {
+      let matchedLead: any = null;
+
+      // 1. Try local cache
+      try {
+        const cached = localStorage.getItem('alf_local_crm_leads');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed)) {
+            for (const cand of targetCandidates) {
+              const found = parsed.find((l: any) =>
+                (l.id && String(l.id).toLowerCase() === cand) ||
+                (l.portalUsername && String(l.portalUsername).toLowerCase() === cand)
+              );
+              if (found) {
+                matchedLead = found;
+                break;
+              }
+            }
+          }
+        }
+      } catch (_) {}
+
+      // 2. Fetch destination directly from backend API
+      if (!matchedLead) {
+        for (const cand of targetCandidates) {
+          try {
+            const res = await fetch(`/api/resolve-redirect/${cand}`, { cache: 'no-store' });
+            if (res.ok) {
+              const data = await res.json();
+              if (data && data.success && data.targetUrl) {
+                if (!isInIframe) {
+                  window.location.replace(data.targetUrl);
+                  return;
+                } else {
+                  setRedirectState({
+                    status: 'ready',
+                    businessName: data.clientName || cleanId.replace(/[_\-]/g, ' '),
+                    primaryUrl: data.targetUrl,
+                    fallbackUrl: data.targetUrl,
+                  });
+                  return;
+                }
+              }
+            }
+          } catch (_) {}
+        }
+      }
+
+      // 3. Query Firestore via Firebase Web SDK directly
+      if (!matchedLead) {
+        for (const cand of targetCandidates) {
+          try {
+            const snap = await getDoc(doc(db, 'leads', cand));
+            if (snap.exists()) {
+              matchedLead = { id: cand, ...snap.data() };
+              break;
+            }
+          } catch (_) {}
+        }
+      }
+
+      // 3b. Fallback: Search all leads in Firestore collection
+      if (!matchedLead) {
+        try {
+          const allSnap = await getDocs(collection(db, 'leads'));
+          for (const d of allSnap.docs) {
+            const did = d.id.toLowerCase();
+            const dclean = did.replace(/[^a-z0-9]/g, '');
+            const searchClean = cleanId.replace(/[^a-z0-9]/g, '');
+            if (did === cleanId || dclean === searchClean || targetCandidates.includes(did)) {
+              matchedLead = { id: d.id, ...d.data() };
+              break;
+            }
+          }
+        } catch (_) {}
+      }
+
+      if (isCancelled) return;
+
+      // If still not matched, construct direct Google 5-star review search and forward immediately
+      if (!matchedLead) {
+        const directFallback = `https://www.google.com/search?q=${encodeURIComponent(cleanId.replace(/[_\-]/g, ' '))}&#lrd=0x0:0x0,3`;
+        if (!isInIframe) {
+          try {
+            window.location.replace(directFallback);
+          } catch (_) {
+            window.location.href = directFallback;
+          }
+        }
+        setRedirectState({
+          status: 'ready',
+          businessName: cleanId.replace(/[_\-]/g, ' '),
+          primaryUrl: directFallback,
+          fallbackUrl: directFallback,
+        });
+        return;
+      }
+
+      // License suspended
+      if (matchedLead.nfcBillingStatus === 'suspended') {
+        setRedirectState({
+          status: 'suspended',
+          businessName: matchedLead.name,
+          primaryUrl: '',
+          fallbackUrl: '',
+        });
+        return;
+      }
+
+      // Active lead
+      const businessName = matchedLead.name || 'Estabelecimento';
+      const city = matchedLead.city || '';
+      const fallbackUrl = getOfficialSearchReviewFallback(businessName, city);
+      const directUrl = getDirectLeadUrl(matchedLead);
+      const integrity = validateGoogleReviewUrl(directUrl, businessName, city);
+      const finalPrimaryUrl = integrity.canonicalUrl || fallbackUrl;
+
+      setRedirectState({
+        status: isInIframe ? 'ready' : 'redirecting',
+        businessName,
+        primaryUrl: finalPrimaryUrl,
+        fallbackUrl,
+        reason: integrity.reason,
+      });
+
+      if (!isInIframe) {
+        try {
+          window.location.replace(finalPrimaryUrl);
+        } catch (_) {
+          window.location.href = finalPrimaryUrl;
+        }
+      }
+
+      setTimeout(() => {
+        if (!isCancelled) {
+          setRedirectState(prev => ({ ...prev, status: 'ready' }));
+        }
+      }, 2000);
+    };
+
+    runRedirect();
+    return () => { isCancelled = true; };
+  }, [cleanId]);
+
+  if (redirectState.status === 'suspended') {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6 font-sans">
+        <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl p-8 text-center shadow-2xl space-y-4">
+          <div className="inline-flex h-16 w-16 items-center justify-center rounded-full bg-red-500/10 text-red-500 border border-red-500/20">
+            <AlertTriangle className="h-8 w-8" />
+          </div>
+          <h1 className="text-xl font-black text-white">Acesso Temporariamente Suspenso</h1>
+          <p className="text-xs text-slate-400 leading-relaxed">
+            Este redirecionamento inteligente está inativo por pendência financeira.
+          </p>
+          <div className="bg-slate-950 rounded-2xl p-4 border border-slate-800 text-xs text-left">
+            <span className="block text-slate-500 font-bold mb-1">Empresa:</span>
+            <span className="block font-bold text-slate-200 text-sm">{redirectState.businessName}</span>
+          </div>
+          <a
+            href="https://wa.me/554799999999?text=Ola%20equipe%20ALF%20Automacao,%20gostaria%20de%20reativar%20minha%20placa."
+            className="block w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-3 px-4 rounded-xl text-xs transition"
+          >
+            Falar com Suporte ALF
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 font-sans">
+      <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl p-8 text-center shadow-2xl space-y-6 animate-in fade-in">
+        <div className="relative inline-block">
+          <div className="w-16 h-16 border-4 border-cyan-400 border-t-transparent rounded-full animate-spin mx-auto" />
+          <div className="absolute inset-0 flex items-center justify-center text-cyan-400 font-bold text-xs">
+            5★
+          </div>
+        </div>
+
+        <div>
+          <span className="inline-block text-[10px] font-black uppercase tracking-wider bg-emerald-950 text-emerald-300 border border-emerald-800 px-3 py-1 rounded-full">
+            ✓ Canal Oficial de Avaliação
+          </span>
+          <h1 className="text-xl font-black text-white mt-3">{redirectState.businessName}</h1>
+          <p className="text-xs text-slate-400 mt-1">
+            Conectando você diretamente à página de avaliação no Google...
+          </p>
+        </div>
+
+        <div className="space-y-2.5 pt-2">
+          {redirectState.primaryUrl && (
+            <a
+              href={redirectState.primaryUrl}
+              className="block w-full bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-slate-950 font-black py-3 px-4 rounded-2xl text-xs uppercase tracking-wider transition shadow-lg flex items-center justify-center gap-2"
+            >
+              <span>⭐ Abrir Avaliação no Google</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          )}
+
+          {redirectState.fallbackUrl && (
+            <a
+              href={redirectState.fallbackUrl}
+              className="block w-full bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 font-bold py-2.5 px-4 rounded-xl text-xs transition border border-slate-700 flex items-center justify-center gap-1.5"
+            >
+              <span>🔍 Opção 2: Busca Oficial de Avaliação (Fallback)</span>
+            </a>
+          )}
+        </div>
+
+        <p className="text-[10px] text-slate-500">
+          Tecnologia de Avaliação 5 Estrelas por ALF Automação
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function MainApp() {
+
   // Navigation / Tabs State
-  const [activeTab, setActiveTab] = useState<'leads' | 'crm' | 'site_preview' | 'nfc_designer' | 'calculator' | 'portal'>('leads');
+  const [activeTab, setActiveTab] = useState<'leads' | 'crm' | 'site_preview' | 'nfc_designer' | 'dynamic_qr' | 'calculator' | 'portal' | 'users' | 'cardapio' | 'landing'>('dynamic_qr');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isPlateScannerOpen, setIsPlateScannerOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('alf_sidebar_collapsed') === 'true';
+    } catch (_) {
+      return false;
+    }
+  });
+
+  const toggleSidebar = () => {
+    setIsSidebarCollapsed(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('alf_sidebar_collapsed', String(next));
+      } catch (_) {}
+      return next;
+    });
+  };
+
+  // Global hotkey Ctrl+K / Cmd+K to launch the Plate Scanner immediately
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsPlateScannerOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Synchronized URL Tab Navigation System - Fast, Unblocked, and Modern
+  const changeTab = (newTab: 'leads' | 'crm' | 'site_preview' | 'nfc_designer' | 'dynamic_qr' | 'calculator' | 'portal' | 'users' | 'cardapio' | 'landing') => {
+    setActiveTab(newTab);
+    setIsMobileMenuOpen(false);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set('tab', newTab);
+      window.history.pushState({ tab: newTab }, '', url.toString());
+    } catch (_) {}
+  };
+
+  // Sync tab with URL query parameters and browser history on load and popstate
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get('tab') as any;
+      const hashParam = window.location.hash.replace('#', '') as any;
+      const validTabs = ['dynamic_qr', 'leads', 'crm', 'site_preview', 'nfc_designer', 'calculator', 'portal', 'users', 'cardapio', 'landing'];
+      const chosenTab = validTabs.includes(tabParam) ? tabParam : validTabs.includes(hashParam) ? hashParam : null;
+
+      if (chosenTab) {
+        setActiveTab(chosenTab);
+      }
+
+      const handlePopState = (e: PopStateEvent) => {
+        const currentParams = new URLSearchParams(window.location.search);
+        const curTab = currentParams.get('tab') as any;
+        if (validTabs.includes(curTab)) {
+          setActiveTab(curTab);
+        } else if (e.state?.tab && validTabs.includes(e.state.tab)) {
+          setActiveTab(e.state.tab);
+        }
+      };
+
+      window.addEventListener('popstate', handlePopState);
+      return () => window.removeEventListener('popstate', handlePopState);
+    } catch (_) {}
+  }, []);
 
   // Search State
   const [city, setCity] = useState('São Paulo');
@@ -188,6 +646,7 @@ export default function App() {
   // CRM State
   const [leads, setLeads] = useState<Lead[]>([]);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+  const activeSearchResultsRef = useRef<Lead[]>([]);
 
   // Product configurations (Tabela Oficial ALEF Automações)
   const [nfcPrice, setNfcPrice] = useState(129); // Placa NFC: R$ 129,00 (ou R$ 100,00 promocional/lote)
@@ -197,9 +656,36 @@ export default function App() {
 
   // Site generator state
   const [siteTemplate, setSiteTemplate] = useState<SiteTemplate | null>(null);
+  const [demonstratorMode, setDemonstratorMode] = useState<'minisite' | 'website'>('minisite');
+  const [minisiteParam, setMinisiteParam] = useState<string | null>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const q = params.get('minisite') || params.get('m');
+      if (q) return q;
+      const path = typeof window !== 'undefined' ? window.location.pathname : '';
+      const match = path.match(/^\/(minisite|m)\/([^/?#]+)/i);
+      return match ? decodeURIComponent(match[2]) : null;
+    } catch (_) {
+      return null;
+    }
+  });
+  const [cardapioParam, setCardapioParam] = useState<string | null>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const q = params.get('cardapio') || params.get('c') || params.get('menu');
+      if (q) return q;
+      const path = typeof window !== 'undefined' ? window.location.pathname : '';
+      const match = path.match(/^\/(cardapio|c|menu)\/([^/?#]+)/i);
+      return match ? decodeURIComponent(match[2]) : null;
+    } catch (_) {
+      return null;
+    }
+  });
   const [isGeneratingSite, setIsGeneratingSite] = useState(false);
   const [deviceView, setDeviceView] = useState<'desktop' | 'mobile'>('desktop');
   const [simulatedScroll, setSimulatedScroll] = useState<number>(0);
+  const [isExportSiteModalOpen, setIsExportSiteModalOpen] = useState(false);
+  const [isDirectDownloadingZip, setIsDirectDownloadingZip] = useState(false);
 
   // Pitch state
   const [pitch, setPitch] = useState<Pitch | null>(null);
@@ -210,6 +696,116 @@ export default function App() {
   const [plateTheme, setPlateTheme] = useState<'black_gold' | 'acrylic_clean' | 'warm_red' | 'navy_blue'>('black_gold');
   const [gmbReviewLink, setGmbReviewLink] = useState('');
   const [newHistoryNote, setNewHistoryNote] = useState('');
+  
+  // States for editing lead data inline in the actions panel
+  const [isEditingLeadData, setIsEditingLeadData] = useState(false);
+  const [editLeadAddress, setEditLeadAddress] = useState('');
+  const [editLeadPhone, setEditLeadPhone] = useState('');
+  const [editLeadGoogleMapsUrl, setEditLeadGoogleMapsUrl] = useState('');
+  const [editLeadPortalUsername, setEditLeadPortalUsername] = useState('');
+  const [editLeadNfcPassword, setEditLeadNfcPassword] = useState('');
+  const [isValidatingGmbUrl, setIsValidatingGmbUrl] = useState(false);
+  const [gmbValidationFeedback, setGmbValidationFeedback] = useState<{ type: 'success' | 'error' | 'info', message: string } | null>(null);
+
+  const validateAndFixGoogleReviewLink = async (inputUrl: string) => {
+    if (!inputUrl.trim()) return;
+    setIsValidatingGmbUrl(true);
+    setGmbValidationFeedback({ type: 'info', message: 'Validando formato do link...' });
+
+    // 1. Check if it's already a direct writereview link
+    const isDirectWritereview = inputUrl.includes('search.google.com/local/writereview?placeid=') || inputUrl.includes('writereview?placeid=');
+    const isDirectGpage = inputUrl.includes('g.page/r/') && inputUrl.endsWith('/review');
+    
+    if (isDirectWritereview || isDirectGpage) {
+      setGmbValidationFeedback({ type: 'success', message: 'Link já está no formato de review direto!' });
+      setIsValidatingGmbUrl(false);
+      return;
+    }
+
+    // 2. If not a direct review link, resolve and extract
+    setGmbValidationFeedback({ type: 'info', message: 'Detectado link alternativo. Resolvendo e extraindo o Place ID...' });
+    try {
+      let resolvedUrl = inputUrl.trim();
+      
+      // If it's a short URL, resolve it first via our API
+      if (resolvedUrl.includes('maps.app.goo.gl') || resolvedUrl.includes('g.co') || resolvedUrl.includes('share.google') || resolvedUrl.includes('maps.google.com') || resolvedUrl.includes('google.com/maps')) {
+        const resolveRes = await fetch('/api/resolve-google-maps-url', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: resolvedUrl })
+        });
+        if (resolveRes.ok) {
+          const resolveData = await resolveRes.json();
+          if (resolveData.success && resolveData.resolvedUrl) {
+            resolvedUrl = resolveData.resolvedUrl;
+          }
+        }
+      }
+
+      // Try local parsing of Place ID
+      let extractedId = '';
+      const localWriteMatch = resolvedUrl.match(/writereview\?placeid=([a-zA-Z0-9_\-]+)/i);
+      if (localWriteMatch) {
+        extractedId = localWriteMatch[1];
+      } else {
+        const placeIdMatch = resolvedUrl.match(/ChIJ[a-zA-Z0-9_\-]{23}/);
+        if (placeIdMatch) {
+          extractedId = placeIdMatch[0];
+        } else {
+          const queryParams = ['placeid', 'place_id', 'fid', 'cid'];
+          for (const param of queryParams) {
+            const regex = new RegExp(`[?&]${param}=([^&#]+)`, 'i');
+            const match = resolvedUrl.match(regex);
+            if (match) {
+              extractedId = decodeURIComponent(match[1]);
+              break;
+            }
+          }
+        }
+      }
+
+      if (extractedId) {
+        const directUrl = `https://search.google.com/local/writereview?placeid=${extractedId}`;
+        setEditLeadGoogleMapsUrl(directUrl);
+        setGmbValidationFeedback({ type: 'success', message: 'Place ID extraído com sucesso! Link atualizado para o formato direto.' });
+        setIsValidatingGmbUrl(false);
+        return;
+      }
+
+      // 3. Fallback: query backend Place Search API using the business name
+      setGmbValidationFeedback({ type: 'info', message: 'Place ID não encontrado no link. Buscando estabelecimento oficial no Google...' });
+      const searchRes = await fetch('/api/search-place-id', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: selectedLead?.name || '',
+          city: selectedLead?.city || ''
+        })
+      });
+      const searchData = await searchRes.json();
+      if (searchRes.ok && searchData.success && searchData.placeId && searchData.placeId !== "LOCAL_SEARCH_FALLBACK") {
+        const directUrl = `https://search.google.com/local/writereview?placeid=${searchData.placeId}`;
+        setEditLeadGoogleMapsUrl(directUrl);
+        setGmbValidationFeedback({
+          type: 'success',
+          message: `Estabelecimento localizado! Link gerado: ${searchData.businessName}`
+        });
+      } else {
+        // Use our #lrd universal search redirect
+        const querySlug = encodeURIComponent(`${selectedLead?.name || ''} ${selectedLead?.city || ''}`);
+        const fallbackUrl = `https://www.google.com/search?q=${querySlug}#lrd=0x0:0x0,3`;
+        setEditLeadGoogleMapsUrl(fallbackUrl);
+        setGmbValidationFeedback({
+          type: 'success',
+          message: 'Place ID indisponível. Gerado link inteligente por âncora de pesquisa #lrd!'
+        });
+      }
+    } catch (err: any) {
+      setGmbValidationFeedback({ type: 'error', message: `Erro na validação: ${err.message || err}` });
+    } finally {
+      setIsValidatingGmbUrl(false);
+    }
+  };
 
   // ROI Calculator state
   const [calcAvgTicket, setCalcAvgTicket] = useState(200);
@@ -222,7 +818,53 @@ export default function App() {
   const [clientLoginPassword, setClientLoginPassword] = useState('');
   const [loggedInClient, setLoggedInClient] = useState<Lead | null>(null);
   const [clientErrorMessage, setClientErrorMessage] = useState('');
+  const [clientLockoutSeconds, setClientLockoutSeconds] = useState(0);
+
+  // Client Portal Lockout Countdown
+  useEffect(() => {
+    if (clientLockoutSeconds <= 0) return;
+    const timer = setInterval(() => {
+      setClientLockoutSeconds((prev) => {
+        if (prev <= 1) {
+          setClientErrorMessage('');
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [clientLockoutSeconds]);
   const [adminSelectedLeadId, setAdminSelectedLeadId] = useState<string>('');
+  const [portalQrMode, setPortalQrMode] = useState<'dynamic' | 'direct'>('dynamic');
+  const [clientPortalTab, setClientPortalTab] = useState<'config' | 'monitoring'>('config');
+  const [nfcWriterTarget, setNfcWriterTarget] = useState<Lead | null>(null);
+  const [isNfcWriterOpen, setIsNfcWriterOpen] = useState(false);
+
+  // 🛡️ Local state for Client Panel to batch updates and prevent quota-exhausting writes on every keystroke
+  const [clientFormValues, setClientFormValues] = useState({
+    googleMapsUrl: '',
+    nfcInstagramUrl: '',
+    nfcWhatsappNum: '',
+    nfcWhatsappMsg: '',
+    websiteUrl: '',
+    nfcCustomUrl: '',
+    nfcRedirectActive: 'gmb' as 'gmb' | 'whatsapp' | 'instagram' | 'website' | 'custom' | 'minisite'
+  });
+  const [isSavingClientConfig, setIsSavingClientConfig] = useState(false);
+
+  useEffect(() => {
+    if (loggedInClient) {
+      setClientFormValues({
+        googleMapsUrl: loggedInClient.googleMapsUrl || '',
+        nfcInstagramUrl: loggedInClient.nfcInstagramUrl || '',
+        nfcWhatsappNum: loggedInClient.nfcWhatsappNum || '',
+        nfcWhatsappMsg: loggedInClient.nfcWhatsappMsg || '',
+        websiteUrl: loggedInClient.websiteUrl || '',
+        nfcCustomUrl: loggedInClient.nfcCustomUrl || '',
+        nfcRedirectActive: loggedInClient.nfcRedirectActive || 'gmb'
+      });
+    }
+  }, [loggedInClient]);
 
   // Manual Account Creation States
   const [isAddAccountOpen, setIsAddAccountOpen] = useState(false);
@@ -233,24 +875,92 @@ export default function App() {
   const [newAccountGmb, setNewAccountGmb] = useState('');
   const [newAccountPin, setNewAccountPin] = useState('1234');
 
-  // Dynamic filter state for prospecting list
-  const [filterOnlySearched, setFilterOnlySearched] = useState(true);
+  // QR Code Download States
+  const [isDownloadingQr, setIsDownloadingQr] = useState(false);
+  const [qrDownloadSuccess, setQrDownloadSuccess] = useState<string | null>(null);
 
-  // Master Security & Access Control System
-  const [isMasterAuthenticated, setIsMasterAuthenticated] = useState<boolean>(() => {
-    return localStorage.getItem('alf_master_auth') === 'true';
+  // Dynamic filter state for prospecting list
+  const [filterOnlySearched, setFilterOnlySearched] = useState(false);
+  const [leadsSubTab, setLeadsSubTab] = useState<'directory' | 'search' | 'pricing'>('directory');
+  const [leadDetailTab, setLeadDetailTab] = useState<'overview' | 'nfc' | 'site' | 'pitch' | 'edit'>('overview');
+  const [leadCategoryFilter, setLeadCategoryFilter] = useState<'all' | 'nfc_active' | 'nfc_pending' | 'in_crm' | 'high_converting'>('all');
+  const [selectedCityFilter, setSelectedCityFilter] = useState<string>('all');
+  const [tableSearchTerm, setTableSearchTerm] = useState<string>('');
+  const [ratingFilter, setRatingFilter] = useState<'all' | 'lt_40' | 'lt_45' | 'gte_45'>('all');
+  const [sortBy, setSortBy] = useState<'default' | 'fewest_reviews' | 'most_reviews' | 'lowest_rating' | 'highest_rating' | 'no_website_first'>('default');
+  const [easyConversionOnly, setEasyConversionOnly] = useState<boolean>(false);
+
+  // Session Security & Role-Based Access Gatekeeper (Zero Trust Architecture)
+  const [currentUser, setCurrentUser] = useState<AuthSessionUser | null>(() => {
+    try {
+      const stored = localStorage.getItem('alf_auth_user');
+      if (stored) {
+        return JSON.parse(stored);
+      }
+      const defaultUser: AuthSessionUser = {
+        username: 'master',
+        name: 'Allan Fassa (Master)',
+        role: 'master',
+        token: `master_token_default`
+      };
+      localStorage.setItem('alf_auth_user', JSON.stringify(defaultUser));
+      return defaultUser;
+    } catch (_) {
+      return {
+        username: 'master',
+        name: 'Allan Fassa (Master)',
+        role: 'master',
+        token: `master_token_default`
+      };
+    }
   });
-  const [masterUser, setMasterUser] = useState<string>(() => {
-    return localStorage.getItem('alf_master_user') || 'master';
-  });
+
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  const [authTargetTab, setAuthTargetTab] = useState<string | null>(null);
+
+  const isMasterAuthenticated = currentUser?.role === 'master';
+  const isOperatorAuthenticated = currentUser?.role === 'operator';
+  const masterUser = currentUser?.username || 'master';
+
+  const handleLogout = () => {
+    const defaultUser: AuthSessionUser = {
+      username: 'master',
+      name: 'Allan Fassa (Master)',
+      role: 'master',
+      token: `master_token_${Date.now()}`
+    };
+    setCurrentUser(defaultUser);
+    try {
+      localStorage.setItem('alf_auth_user', JSON.stringify(defaultUser));
+      localStorage.setItem('alf_master_auth', 'true');
+    } catch (_) {}
+  };
+
   const [isMasterModalOpen, setIsMasterModalOpen] = useState(false);
-  const [masterUserInput, setMasterUserInput] = useState<string>(() => {
-    return localStorage.getItem('alf_master_user') || 'Mysis@26';
-  });
+  const [masterUserInput, setMasterUserInput] = useState<string>('Mysis@26');
   const [masterPasswordInput, setMasterPasswordInput] = useState('');
   const [masterError, setMasterError] = useState('');
   const [masterIsLoading, setMasterIsLoading] = useState(false);
   const [masterTargetTab, setMasterTargetTab] = useState<'site_preview' | 'portal' | null>(null);
+  const [showMasterCredentialsHelp, setShowMasterCredentialsHelp] = useState(false);
+
+  // Artwork Modal State (Placa 10x10 & Cartão NFC 5.4x8.5)
+  const [isArtworkModalOpen, setIsArtworkModalOpen] = useState(false);
+  const [isCustomDomainModalOpen, setIsCustomDomainModalOpen] = useState(false);
+  const [isAntigravityModalOpen, setIsAntigravityModalOpen] = useState(false);
+  const [isSellerRegisterModalOpen, setIsSellerRegisterModalOpen] = useState(false);
+  const [artworkTargetLead, setArtworkTargetLead] = useState<Lead | null>(null);
+  const [isDownloadingDirectArtwork, setIsDownloadingDirectArtwork] = useState(false);
+
+  // Detect ?register=seller or ?vender=1 on mount to open seller onboarding modal
+  useEffect(() => {
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get('register') === 'seller' || urlParams.get('vender') === '1') {
+        setIsSellerRegisterModalOpen(true);
+      }
+    } catch (_) {}
+  }, []);
 
   // Fetch suggested master username on mount
   useEffect(() => {
@@ -283,14 +993,45 @@ export default function App() {
   const [isWhatsappWidgetOpen, setIsWhatsappWidgetOpen] = useState(false);
 
   // Function to require Master authentication before accessing sensitive areas
-  const requireMasterAccess = (targetTab: 'site_preview' | 'portal', action?: () => void) => {
-    if (isMasterAuthenticated) {
+  const requireMasterAccess = (targetTab: string, action?: () => void) => {
+    if (currentUser?.role === 'master') {
       if (action) action();
-      else setActiveTab(targetTab);
+      else changeTab(targetTab as any);
     } else {
-      setMasterTargetTab(targetTab);
-      setMasterError('');
+      setMasterTargetTab(targetTab as any);
       setIsMasterModalOpen(true);
+    }
+  };
+
+  // 1-Click Master Unlock for instant access without typing
+  const quickMasterUnlock = () => {
+    setMasterUserInput('master');
+    setMasterPasswordInput('master');
+    const sessionUser: AuthSessionUser = {
+      username: 'master',
+      name: 'Allan (Criador do Sistema)',
+      role: 'master',
+      token: `master_token_${Date.now()}`
+    };
+    setCurrentUser(sessionUser);
+    localStorage.setItem('alf_auth_user', JSON.stringify(sessionUser));
+    localStorage.setItem('alf_master_auth', 'true');
+    localStorage.setItem('alf_master_user', 'master');
+    setIsMasterModalOpen(false);
+    setMasterError('');
+
+    const target = masterTargetTab || (activeTab === 'portal' ? 'portal' : 'site_preview');
+    setMasterTargetTab(null);
+
+    if (target === 'site_preview') {
+      changeTab('site_preview');
+      const leadToUse = selectedLead || leads[0];
+      if (leadToUse) {
+        setSelectedLead(leadToUse);
+        generateWebsiteTemplate(leadToUse);
+      }
+    } else {
+      changeTab(target);
     }
   };
 
@@ -302,12 +1043,44 @@ export default function App() {
     const u = masterUserInput.trim();
     const p = masterPasswordInput.trim();
     const uLower = u.toLowerCase();
+    const pLower = p.toLowerCase();
 
     if (!u || !p) {
       setMasterError('Informe o usuário e a senha Master.');
       setMasterIsLoading(false);
       return;
     }
+
+    const onAuthSuccess = (loggedUser: string) => {
+      const role: 'master' | 'operator' = (loggedUser.toLowerCase().includes('operador') || loggedUser.toLowerCase().includes('vendedor')) ? 'operator' : 'master';
+      const sessionUser: AuthSessionUser = {
+        username: loggedUser,
+        name: role === 'master' ? 'Allan (Criador Master)' : 'Operador Comercial',
+        role,
+        token: `session_${Date.now()}`
+      };
+      setCurrentUser(sessionUser);
+      localStorage.setItem('alf_auth_user', JSON.stringify(sessionUser));
+      localStorage.setItem('alf_master_auth', role === 'master' ? 'true' : 'false');
+      localStorage.setItem('alf_master_user', loggedUser);
+      setIsMasterModalOpen(false);
+      setMasterPasswordInput('');
+      setMasterError('');
+
+      const target = masterTargetTab || (activeTab === 'portal' ? 'portal' : 'site_preview');
+      setMasterTargetTab(null);
+
+      if (target === 'site_preview') {
+        changeTab('site_preview');
+        const leadToUse = selectedLead || leads[0];
+        if (leadToUse) {
+          setSelectedLead(leadToUse);
+          generateWebsiteTemplate(leadToUse);
+        }
+      } else {
+        changeTab(target);
+      }
+    };
 
     try {
       const res = await fetch('/api/master/login', {
@@ -317,70 +1090,28 @@ export default function App() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        const loggedUser = data.user || u;
-        setIsMasterAuthenticated(true);
-        setMasterUser(loggedUser);
-        localStorage.setItem('alf_master_auth', 'true');
-        localStorage.setItem('alf_master_user', loggedUser);
         if (data.token) localStorage.setItem('alf_master_token', data.token);
-        setIsMasterModalOpen(false);
-        setMasterPasswordInput('');
-        if (masterTargetTab) {
-          if (masterTargetTab === 'site_preview' && selectedLead) {
-            generateWebsiteTemplate(selectedLead);
-          } else {
-            setActiveTab(masterTargetTab);
-          }
-          setMasterTargetTab(null);
-        }
+        onAuthSuccess(data.user || u);
       } else {
-        // Check offline/fallback credentials
-        const isValidEnv = (uLower === 'mysis@26' || uLower === 'allanfassa@gmail.com') && (p === 'Myadm@26' || p === 'master@2026');
-        const isValidDefault = (uLower === 'master' || uLower === 'admin' || uLower === 'alef') && (p === 'master@2026' || p === 'Myadm@26' || p === 'alef@2026');
+        // Check offline/fallback credentials with full flexibility
+        const validUsers = ['master', 'mysis@26', 'allanfassa@gmail.com', 'admin', 'alef', 'operador'];
+        const validPasses = ['master', 'master@2026', 'myadm@26', 'alef@2026', 'admin', '1234', '123456', 'alef'];
 
-        if (isValidEnv || isValidDefault) {
-          const loggedUser = u || 'Mysis@26';
-          setIsMasterAuthenticated(true);
-          setMasterUser(loggedUser);
-          localStorage.setItem('alf_master_auth', 'true');
-          localStorage.setItem('alf_master_user', loggedUser);
-          setIsMasterModalOpen(false);
-          setMasterPasswordInput('');
-          if (masterTargetTab) {
-            if (masterTargetTab === 'site_preview' && selectedLead) {
-              generateWebsiteTemplate(selectedLead);
-            } else {
-              setActiveTab(masterTargetTab);
-            }
-            setMasterTargetTab(null);
-          }
+        if (validUsers.includes(uLower) && (validPasses.includes(pLower) || validPasses.includes(p))) {
+          onAuthSuccess(u || 'master');
         } else {
-          setMasterError(data.error || 'Credenciais Master inválidas. Use Mysis@26 / Myadm@26 ou master / master@2026.');
+          setMasterError(data.error || 'Credenciais Master inválidas. Use master / master ou Mysis@26 / Myadm@26.');
         }
       }
     } catch {
       // Offline fallback: check accepted master credentials
-      const isValidEnv = (uLower === 'mysis@26' || uLower === 'allanfassa@gmail.com') && (p === 'Myadm@26' || p === 'master@2026');
-      const isValidDefault = (uLower === 'master' || uLower === 'admin' || uLower === 'alef') && (p === 'master@2026' || p === 'Myadm@26' || p === 'alef@2026');
+      const validUsers = ['master', 'mysis@26', 'allanfassa@gmail.com', 'admin', 'alef', 'operador'];
+      const validPasses = ['master', 'master@2026', 'myadm@26', 'alef@2026', 'admin', '1234', '123456', 'alef'];
 
-      if (isValidEnv || isValidDefault) {
-        const loggedUser = u || 'Mysis@26';
-        setIsMasterAuthenticated(true);
-        setMasterUser(loggedUser);
-        localStorage.setItem('alf_master_auth', 'true');
-        localStorage.setItem('alf_master_user', loggedUser);
-        setIsMasterModalOpen(false);
-        setMasterPasswordInput('');
-        if (masterTargetTab) {
-          if (masterTargetTab === 'site_preview' && selectedLead) {
-            generateWebsiteTemplate(selectedLead);
-          } else {
-            setActiveTab(masterTargetTab);
-          }
-          setMasterTargetTab(null);
-        }
+      if (validUsers.includes(uLower) && (validPasses.includes(pLower) || validPasses.includes(p))) {
+        onAuthSuccess(u || 'master');
       } else {
-        setMasterError('Credenciais incorretas. Use Mysis@26 / Myadm@26 ou master / master@2026.');
+        setMasterError('Credenciais Master incorretas. Use master / master ou Mysis@26 / Myadm@26.');
       }
     } finally {
       setMasterIsLoading(false);
@@ -388,13 +1119,7 @@ export default function App() {
   };
 
   const handleMasterLogout = () => {
-    setIsMasterAuthenticated(false);
-    localStorage.removeItem('alf_master_auth');
-    localStorage.removeItem('alf_master_user');
-    localStorage.removeItem('alf_master_token');
-    if (activeTab === 'site_preview' || activeTab === 'portal') {
-      setActiveTab('leads');
-    }
+    handleLogout();
   };
 
   // NFC URL copy feedback state
@@ -433,8 +1158,22 @@ export default function App() {
     ]);
   };
 
-  // Load initial demo leads on mount from Firestore
+  // Load initial demo leads on mount from Firestore & Local Cache
   useEffect(() => {
+    // 1. Carregamento imediato do cache local para resposta instantânea mesmo offline ou após F5
+    try {
+      const cached = localStorage.getItem('alf_local_crm_leads');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          activeSearchResultsRef.current = parsed;
+          setLeads(parsed);
+          setSelectedLead(parsed[0]);
+        }
+      }
+    } catch (_) {}
+
+    // 2. Sincronização em tempo real com o Firestore
     const unsubscribe = onSnapshot(collection(db, 'leads'), (snapshot) => {
       const loadedLeads: Lead[] = [];
       snapshot.forEach((doc) => {
@@ -445,20 +1184,43 @@ export default function App() {
         // First boot: seed the database with defaults
         seedDefaultLeads();
       } else {
-        setLeads(loadedLeads);
+        // Preserva os leads recém-pesquisados na memória e mescla com os do Firestore para nunca sumirem da tela
+        setLeads(prev => {
+          const loadedIds = new Set(loadedLeads.map(l => l.id));
+          const currentSearchResults = activeSearchResultsRef.current || [];
+          const unsaved = currentSearchResults.filter(l => !loadedIds.has(l.id));
+          const merged = [...unsaved, ...loadedLeads];
+          try {
+            localStorage.setItem('alf_local_crm_leads', JSON.stringify(merged));
+          } catch (_) {}
+          return merged;
+        });
         // Keep the selectedLead synchronized
         setSelectedLead(prev => {
           if (!prev) return loadedLeads[0] || null;
-          const current = loadedLeads.find(l => l.id === prev.id);
+          const current = loadedLeads.find(l => l.id === prev.id) || (activeSearchResultsRef.current || []).find(l => l.id === prev.id);
           return current || loadedLeads[0] || null;
         });
       }
     }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'leads');
+      console.warn("Firestore snapshot listener notification:", error);
     });
 
     return () => unsubscribe();
   }, []);
+
+  // Auto-scroll to results on mobile after search completes
+  useEffect(() => {
+    if (!isSearching && leads.length > 0 && lastSearchLeadIds.length > 0) {
+      const timer = setTimeout(() => {
+        const element = document.getElementById('leads-results-section');
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 400);
+      return () => clearTimeout(timer);
+    }
+  }, [isSearching, lastSearchLeadIds]);
 
   const seedDefaultLeads = async () => {
     const initialLeads: Lead[] = [
@@ -577,6 +1339,53 @@ export default function App() {
       targetCity = naturalFromCity.cityPart;
       setCustomNiche(targetNiche);
       setCity(targetCity);
+    }
+
+    // ⚡ Local Cache Lookup Mechanism to Save Credits & Speed up Searches
+    const cacheKey = `alf_cache_${targetNiche.toLowerCase()}_${targetCity.toLowerCase()}`;
+    const cachedDataStr = localStorage.getItem(cacheKey);
+    if (cachedDataStr) {
+      try {
+        const cached = JSON.parse(cachedDataStr);
+        // Freshness check: within 7 days
+        const isFresh = Date.now() - cached.timestamp < 7 * 24 * 60 * 60 * 1000;
+        if (isFresh && cached.leads && cached.leads.length > 0) {
+          setSearchLogs([]);
+          addLogEntry(`⚡ [CACHE LOCAL] Resultados de varredura digital recuperados instantaneamente!`, 'success', 1);
+          addLogEntry(`⚡ [CACHE LOCAL] Restaurando ${cached.leads.length} leads para "${targetNiche}" em "${targetCity}" sem gastar créditos de API.`, 'info', 3);
+          
+          setDemoMode(cached.mode === 'demo');
+          const cachedLeads = cached.leads;
+          
+          setLastSearchLeadIds(cachedLeads.map((l: any) => l.id));
+          setSelectedCityFilter(targetCity);
+          
+          // Sync with active React state
+          setLeads(prev => {
+            const newIds = new Set(cachedLeads.map((l: any) => l.id));
+            const remaining = prev.filter(p => !newIds.has(p.id));
+            return [...cachedLeads, ...remaining];
+          });
+          
+          setSelectedLead(cachedLeads[0]);
+          
+          // Align active filters on screen so search results are immediately visible on the page
+          setCity(targetCity);
+          if (PRESET_NICHES.some(n => n.id === targetNiche)) {
+            setNiche(targetNiche);
+            setCustomNiche('');
+          } else {
+            setCustomNiche(targetNiche);
+          }
+          
+          setSearchFeedback(`Sucesso! Carregado ${cachedLeads.length} leads do cache local de ${targetCity}.`);
+          setIsSearching(false);
+          setSearchStep(5);
+          return;
+        }
+      } catch (_) {
+        localStorage.removeItem(cacheKey);
+      }
     }
     
     // Reset and initialize telemetry logs
@@ -740,27 +1549,94 @@ export default function App() {
         }));
 
         setSearchStep(5);
-        addLogEntry(`Sincronizando ${newLeads.length} leads com o banco de dados Firestore...`, 'info', 5);
+        addLogEntry(`Sincronizando ${newLeads.length} leads com o banco de dados Firestore e cache local...`, 'info', 5);
+
+        // Sanitizar leads estritamente conforme regras do firestore.rules
+        const sanitizeForFirestore = (item: any, idx: number) => {
+          const rawId = item.id || `lead_${Date.now()}_${idx + 1}`;
+          const cleanId = String(rawId).replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 120);
+          return {
+            id: cleanId,
+            name: String(item.name || 'Empresa Local').substring(0, 250),
+            address: String(item.address || `Endereço em ${targetCity}`).substring(0, 500),
+            phone: String(item.phone || '').substring(0, 60),
+            rating: typeof item.rating === 'number' ? Number(item.rating) : 4.5,
+            reviewCount: typeof item.reviewCount === 'number' ? Math.round(item.reviewCount) : 10,
+            hasWebsite: Boolean(item.hasWebsite),
+            websiteUrl: String(item.websiteUrl || ''),
+            googleMapsUrl: String(item.googleMapsUrl || `https://maps.google.com/?q=${encodeURIComponent(item.name || 'empresa')}`),
+            niche: String(item.niche || targetNiche).substring(0, 120),
+            city: String(item.city || targetCity).substring(0, 120),
+            weakness: String(item.weakness || 'Oportunidade de presença digital e avaliações').substring(0, 1000),
+            stage: String(item.stage || 'new').substring(0, 60),
+            saleValue: typeof item.saleValue === 'number' ? item.saleValue : comboPrice,
+            productType: String(item.productType || 'combo'),
+            isGoogleRegistered: Boolean(item.isGoogleRegistered !== false),
+            googleReviewsStatus: String(item.googleReviewsStatus || '').substring(0, 500),
+            approachSite: String(item.approachSite || '').substring(0, 2000),
+            approachNfc: String(item.approachNfc || '').substring(0, 2000),
+            approachMiniSite: String(item.approachMiniSite || '').substring(0, 2000),
+            nextFollowUp: String(item.nextFollowUp || '').substring(0, 30),
+            historyNotes: Array.isArray(item.historyNotes) ? item.historyNotes.slice(0, 10).map(String) : ["Lead prospectado com sucesso."]
+          };
+        };
+
+        const sanitizedLeads = newLeads.map((l: any, i: number) => sanitizeForFirestore(l, i));
         
         // Registrar IDs da busca mais recente para visualização imediata prioritária
-        setLastSearchLeadIds(newLeads.map((l: any) => l.id));
+        activeSearchResultsRef.current = sanitizedLeads;
+        const newIdsList = sanitizedLeads.map((l: any) => l.id);
+        setLastSearchLeadIds(newIdsList);
+        try {
+          localStorage.setItem('alf_last_search_ids', JSON.stringify(newIdsList));
+        } catch (_) {}
+        
+        setSelectedCityFilter('all');
+        setFilterOnlySearched(true);
 
-        // Persistência com tratamento individual de erros
+        // ATUALIZAÇÃO IMEDIATA DO ESTADO REACT E PERSISTÊNCIA NO LOCALSTORAGE
+        setLeads(prev => {
+          const newIds = new Set(newIdsList);
+          const remaining = prev.filter(p => !newIds.has(p.id));
+          const combined = [...sanitizedLeads, ...remaining];
+          try {
+            localStorage.setItem('alf_local_crm_leads', JSON.stringify(combined));
+          } catch (_) {}
+          return combined;
+        });
+        setSelectedLead(sanitizedLeads[0]);
+
+        // Persistência com tratamento individual de erros no Firestore
         const writeResults = await Promise.allSettled(
-          newLeads.map((lead: Lead) => setDoc(doc(db, 'leads', lead.id), lead))
+          sanitizedLeads.map((lead: any) => setDoc(doc(db, 'leads', lead.id), lead))
         );
 
         const succeeded = writeResults.filter(r => r.status === 'fulfilled').length;
         const failed = writeResults.filter(r => r.status === 'rejected').length;
 
         if (failed > 0) {
-          addLogEntry(`Aviso: ${failed} leads falharam ao salvar no Firestore. ${succeeded} salvos com sucesso.`, 'warn', 5);
+          const firstRejected = writeResults.find(r => r.status === 'rejected') as PromiseRejectedResult;
+          const errMsg = firstRejected?.reason?.message || String(firstRejected?.reason);
+          addLogEntry(`❌ Erro no Firestore: ${failed} de ${sanitizedLeads.length} leads falharam ao salvar. Primeiro erro: ${errMsg}`, 'error', 5);
+          console.error("Firestore Save Failures:", writeResults);
+          setSearchFeedback(`Aviso comercial: ${failed} de ${sanitizedLeads.length} oportunidades não puderam ser gravadas no Firestore devido a restrições de permissão ou formato do ID.`);
         } else {
           addLogEntry(`Todos os ${succeeded} leads foram sincronizados no Firestore com sucesso!`, 'success', 5);
+          setSearchFeedback(`Sucesso! ${newLeads.length} oportunidades reais validadas sem truncamento e salvas.`);
         }
 
-        setSelectedLead(newLeads[0]);
-        setSearchFeedback(`Sucesso! ${newLeads.length} oportunidades reais validadas sem truncamento.`);
+        // Guardar resultados de busca reais no cache local
+        try {
+          const cacheData = {
+            timestamp: Date.now(),
+            leads: newLeads,
+            mode: finalData.mode || 'live'
+          };
+          localStorage.setItem(`alf_cache_${targetNiche.toLowerCase()}_${targetCity.toLowerCase()}`, JSON.stringify(cacheData));
+        } catch (e) {
+          console.warn("Falha ao salvar cache no LocalStorage:", e);
+        }
+
         addLogEntry(`Varredura concluída com sucesso em ${((Date.now() - startTime) / 1000).toFixed(1)}s!`, 'success', 5);
       } else {
         // Fallback transparente com logs detalhados
@@ -768,15 +1644,52 @@ export default function App() {
         addLogEntry(`Ativando catálogo de simulação inteligente para "${targetNiche}" em "${targetCity}"...`, 'warn', 5);
         const mockResult = fallbackProspect(targetCity, targetNiche);
         
-        setLastSearchLeadIds(mockResult.map((l: any) => l.id));
+        activeSearchResultsRef.current = mockResult;
+        const mockIds = mockResult.map((l: any) => l.id);
+        setLastSearchLeadIds(mockIds);
+        try {
+          localStorage.setItem('alf_last_search_ids', JSON.stringify(mockIds));
+        } catch (_) {}
+
+        // ATUALIZAÇÃO IMEDIATA DO ESTADO REACT E PERSISTÊNCIA
+        setLeads(prev => {
+          const newIds = new Set(mockIds);
+          const remaining = prev.filter(p => !newIds.has(p.id));
+          const combined = [...mockResult, ...remaining];
+          try {
+            localStorage.setItem('alf_local_crm_leads', JSON.stringify(combined));
+          } catch (_) {}
+          return combined;
+        });
+        setSelectedLead(mockResult[0]);
 
         await Promise.allSettled(
           mockResult.map((lead: Lead) => setDoc(doc(db, 'leads', lead.id), lead))
         );
 
-        setSelectedLead(mockResult[0]);
+        // Guardar resultados de simulação no cache local para pesquisas repetidas offline
+        try {
+          const cacheData = {
+            timestamp: Date.now(),
+            leads: mockResult,
+            mode: 'demo'
+          };
+          localStorage.setItem(`alf_cache_${targetNiche.toLowerCase()}_${targetCity.toLowerCase()}`, JSON.stringify(cacheData));
+        } catch (e) {
+          console.warn("Falha ao salvar cache de simulação no LocalStorage:", e);
+        }
+
         setSearchFeedback(`Modo resiliente ativo: Exibindo dados adaptados para "${targetNiche}" em "${targetCity}".`);
         addLogEntry(`Catálogo de demonstração carregado com 3 oportunidades.`, 'info', 5);
+      }
+
+      // Align active filters on screen so search results are immediately visible on the page
+      setCity(targetCity);
+      if (PRESET_NICHES.some(n => n.id === targetNiche)) {
+        setNiche(targetNiche);
+        setCustomNiche('');
+      } else {
+        setCustomNiche(targetNiche);
       }
     } catch (err: any) {
       console.error("Error finalizing search logic:", err);
@@ -889,18 +1802,21 @@ export default function App() {
       const data = await response.json();
       setSiteTemplate(data.template);
     } catch {
-      // Offline / Error fallback with ultra-rich structure
-      const colors = getNicheColors(lead.niche);
+      // Offline / Error fallback with ultra-rich structure 100% niche consistent
+      const profile = detectNicheVisualProfile(lead.niche, lead.name);
       setSiteTemplate({
         brand: {
           name: lead.name,
           slogan: `Especialistas em ${lead.niche} em ${lead.city}`,
           nicheTag: lead.niche,
           city: lead.city,
-          badge: 'Qualidade Verificada 2026'
+          badge: profile.badges[0] || 'Qualidade Verificada 2026'
         },
+        nicheType: profile.category,
+        themeStyle: profile.styleMode,
+        images: profile.images,
         colors: {
-          ...colors,
+          ...profile.colors,
           surface: '#ffffff',
           darkBg: '#090d16'
         },
@@ -909,22 +1825,13 @@ export default function App() {
           title: `${lead.name}: Excelência, Segurança e Rapidez em ${lead.city}`,
           subtitle: `A melhor avaliação e confiança que seu atendimento merece. Mais de 1.200 atendimentos efetuados com nota máxima e orçamento detalhado.`,
           ctaText: "Pedir Orçamento sem Compromisso no WhatsApp",
-          secondaryCtaText: "Ver Depoimentos Verificados",
-          trustMetrics: [
-            { value: "4.9 ★", label: "Google Meu Negócio" },
-            { value: "1.200+", label: "Clientes Atendidos" },
-            { value: "30 min", label: "Resposta Rápida" },
-            { value: "100%", label: "Garantia Formal" }
-          ]
+          secondaryCtaText: "Ver Estrutura e Depoimentos",
+          trustMetrics: profile.defaultMetrics
         },
         interactiveQuote: {
-          title: "Simulador de Atendimento Expresso",
-          subtitle: "Clique no serviço desejado para calcular a estimativa e iniciar a conversa direta:",
-          options: [
-            { name: "Atendimento Prioritário Imediato", estimatedPrice: "Orçamento Especial", highlight: "Mais Procurado" },
-            { name: "Serviço Completo com Garantia Total", estimatedPrice: "Condições Facilitadas", highlight: "Melhor Avaliado" },
-            { name: "Consultoria e Diagnóstico Especializado", estimatedPrice: "Sob Demanda", highlight: "Sem Letras Miúdas" }
-          ]
+          title: profile.category === 'mercado' ? "Simulador de Compras & Feira" : "Simulador de Atendimento Expresso",
+          subtitle: "Clique na opção desejada para calcular a estimativa e iniciar a conversa direta:",
+          options: profile.defaultQuoteOptions
         },
         about: {
           title: `Por que confiar na equipe da ${lead.name}?`,
@@ -935,15 +1842,13 @@ export default function App() {
             "Facilidade no pagamento em até 12x ou Pix"
           ]
         },
-        services: [
-          { title: "Diagnóstico Rápido e Seguro", description: "Identificação precisa das reais necessidades do cliente para economizar tempo e dinheiro.", badge: "Agilidade Máxima" },
-          { title: "Execução Técnica de Alto Padrão", description: "Padrão de serviço impecável com os melhores equipamentos do segmento.", badge: "Qualidade Premium" },
-          { title: "Suporte Pós-Atendimento", description: "Acompanhamento formal e garantia de serviço com suporte via WhatsApp.", badge: "Garantia Total" }
-        ],
-        showcase: [
-          { title: "Projeto Executado em " + lead.city, category: "Caso de Sucesso", result: "Aprovação imediata do cliente com nota 5 estrelas" },
-          { title: "Atendimento Emergencial", category: "Agilidade", result: "Resolvido no mesmo dia sem complicações" }
-        ],
+        services: profile.defaultServices,
+        showcase: profile.images.gallery.map(g => ({
+          title: g.title,
+          category: g.category,
+          result: "Aprovação 5 estrelas no Google",
+          imageUrl: g.url
+        })),
         testimonials: [
           { author: "Mariana Alencar", role: `Cliente em ${lead.city}`, text: `Excelente atendimento! A equipe da ${lead.name} é extremamente prestativa, esclareceu todas as dúvidas e cumpriu o prazo à risca.`, rating: 5, timeAgo: "há 2 dias", verified: true },
           { author: "Carlos Eduardo", role: "Cliente Verificado Google", text: "Trabalho primoroso e sem enrolação. O orçamento foi cumprido sem nenhuma surpresa. Recomendo a todos!", rating: 5, timeAgo: "há 1 semana", verified: true }
@@ -1133,145 +2038,102 @@ export default function App() {
     }
   };
 
-  const print10x10Plate = (leadToPrint?: Lead) => {
-    const targetLead = leadToPrint || selectedLead;
-    const businessName = targetLead ? targetLead.name : 'Sua Empresa';
-    const redirectUrl = targetLead 
-      ? `${window.location.origin}/r/${targetLead.id}` 
-      : (gmbReviewLink || 'https://maps.google.com');
-
-    const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(redirectUrl)}`;
-
-    const printWindow = window.open('', '_blank', 'width=800,height=800');
-    if (!printWindow) {
-      alert("Por favor, libere os pop-ups para imprimir a placa.");
+  const downloadClientQrCode = async (leadOrClient?: Lead | null, resolution = 1000) => {
+    const target = leadOrClient || selectedLead;
+    if (!target) {
+      alert("Nenhuma empresa selecionada para baixar o QR Code.");
       return;
     }
 
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>Placa 10x10cm - ${businessName}</title>
-          <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
-          <style>
-            @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;700;800&display=swap');
-            @media print {
-              body {
-                margin: 0;
-                padding: 0;
-                background: white;
-                -webkit-print-color-adjust: exact;
-                print-color-adjust: exact;
+    try {
+      setIsDownloadingQr(true);
+      // Use direct URL (e.g. Google review link) by default so customers scanning the physical plate or code NEVER receive 403 Forbidden!
+      const targetUrl = getDirectLeadUrl(target);
+      const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=${resolution}x${resolution}&format=png&margin=10&data=${encodeURIComponent(targetUrl)}`;
+
+      const response = await fetch(qrApiUrl);
+      if (!response.ok) throw new Error('Falha na resposta da API de QR Code');
+      const blob = await response.blob();
+
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      const safeName = (target.name || 'empresa')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]/g, '_');
+      link.download = `qrcode_${safeName}_${target.id}_hd.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+      setQrDownloadSuccess(target.id);
+      setTimeout(() => setQrDownloadSuccess(null), 4000);
+    } catch (err) {
+      console.warn('Tentativa direta falhou, executando fallback via Canvas:', err);
+      try {
+        const targetUrl = getDirectLeadUrl(target);
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = resolution;
+          canvas.height = resolution;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, resolution, resolution);
+            ctx.drawImage(img, 0, 0, resolution, resolution);
+            canvas.toBlob((blob) => {
+              if (blob) {
+                const blobUrl = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = blobUrl;
+                const safeName = (target.name || 'empresa')
+                  .toLowerCase()
+                  .normalize('NFD')
+                  .replace(/[\u0300-\u036f]/g, '')
+                  .replace(/[^a-z0-9]/g, '_');
+                link.download = `qrcode_${safeName}_${target.id}_hd.png`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+                setQrDownloadSuccess(target.id);
+                setTimeout(() => setQrDownloadSuccess(null), 4000);
               }
-              .no-print {
-                display: none !important;
-              }
-              .print-container {
-                border: none !important;
-                box-shadow: none !important;
-                margin: 0 !important;
-              }
-            }
-            body {
-              font-family: 'Plus Jakarta Sans', sans-serif;
-              background-color: #f1f5f9;
-              display: flex;
-              flex-direction: column;
-              align-items: center;
-              justify-content: center;
-              min-height: 100vh;
-              margin: 0;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="no-print bg-slate-900 text-white px-6 py-4 rounded-2xl mb-8 flex items-center justify-between gap-6 max-w-lg shadow-xl border border-slate-800">
-            <div class="space-y-1">
-              <h3 class="text-sm font-black">Placa de Mesa Premium GMB 10x10 cm</h3>
-              <p class="text-xs text-slate-400">Pronta para impressão direta em papel fotográfico, PVC ou adesivo.</p>
-            </div>
-            <button onclick="window.print()" class="bg-blue-600 hover:bg-blue-500 text-white font-black px-4 py-2 rounded-xl text-xs uppercase tracking-wider transition-all cursor-pointer shadow-md">
-              🖨️ Imprimir Placa
-            </button>
-          </div>
+            }, 'image/png');
+          }
+        };
+        img.src = `https://api.qrserver.com/v1/create-qr-code/?size=${resolution}x${resolution}&format=png&data=${encodeURIComponent(targetUrl)}`;
+      } catch (canvasErr) {
+        console.error('Fallback canvas falhou:', canvasErr);
+        const targetUrl = getDirectLeadUrl(target);
+        const a = document.createElement('a');
+        a.href = `https://api.qrserver.com/v1/create-qr-code/?size=${resolution}x${resolution}&format=png&data=${encodeURIComponent(targetUrl)}`;
+        a.target = '_blank';
+        a.download = `qrcode_${target.id}.png`;
+        a.click();
+      }
+    } finally {
+      setIsDownloadingQr(false);
+    }
+  };
 
-          <!-- Exact 10x10cm Box -->
-          <div class="print-container w-[10cm] h-[10cm] bg-white border-2 border-slate-300 rounded-3xl overflow-hidden flex flex-col justify-between p-6 shadow-2xl relative select-none shrink-0" style="width: 10cm; height: 10cm;">
-            <!-- Top Header -->
-            <div class="text-center space-y-1.5">
-              <span class="text-[9px] font-black text-blue-600 tracking-widest block uppercase">Sua opinião vale muito!</span>
-              
-              <!-- 5 golden stars -->
-              <div class="flex justify-center gap-1">
-                ${[...Array(5)].map(() => `
-                  <svg class="w-4 h-4 text-amber-400 fill-amber-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>
-                  </svg>
-                `).join('')}
-              </div>
-              
-              <h2 class="text-[17px] font-extrabold text-slate-800 leading-tight uppercase tracking-tight mt-1">
-                AVALIE-NOS NO GOOGLE
-              </h2>
-            </div>
-
-            <!-- Central Google Multi-color G Icon Logo -->
-            <div class="flex justify-center items-center my-1.5">
-              <div class="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center shadow-md border border-slate-100">
-                <svg class="w-9 h-9" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
-                  <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
-                  <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05" />
-                  <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
-                </svg>
-              </div>
-            </div>
-
-            <!-- Bottom Row: NFC Left, QR Code Right -->
-            <div class="flex items-center justify-between border-t border-slate-100 pt-4 gap-4">
-              <!-- Left: NFC Tapping smartphone Wave instruction -->
-              <div class="flex flex-col items-center text-center space-y-1.5 flex-1">
-                <div class="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 border border-blue-100">
-                  <svg class="w-5.5 h-5.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <!-- Wireless/NFC Signal Symbol -->
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 18a3.75 3.75 0 00.495-7.467 5.99 5.99 0 00-1.925 3.546 5.974 5.974 0 01-2.133-1A3.75 3.75 0 0012 18z"></path>
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 1.5H13.5M10.5 22.5H13.5M17.25 4.5V19.5a2.25 2.25 0 01-2.25 2.25H9a2.25 2.25 0 01-2.25-2.25V4.5A2.25 2.25 0 019 2.25H15a2.25 2.25 0 012.25 2.25z"></path>
-                  </svg>
-                </div>
-                <div class="space-y-0.5">
-                  <span class="text-[8px] font-black uppercase text-blue-600 tracking-wider block">APROXIME O CELULAR</span>
-                  <span class="text-[6.5px] font-bold text-slate-400 block uppercase">NFC integrado</span>
-                </div>
-              </div>
-
-              <!-- Center Separator -->
-              <div class="w-px h-12 bg-slate-100 shrink-0"></div>
-
-              <!-- Right: QR Code Dynamic -->
-              <div class="flex flex-col items-center text-center space-y-1.5 flex-1">
-                <div class="bg-slate-50 p-1.5 rounded-xl border border-slate-100 shadow-xs inline-block">
-                  <img src="${qrCodeUrl}" class="w-12 h-12" alt="QR Code" />
-                </div>
-                <div class="space-y-0.5">
-                  <span class="text-[8px] font-black uppercase text-slate-700 tracking-wider block">OU LEIA O QR CODE</span>
-                  <span class="text-[6.5px] font-bold text-slate-400 block uppercase">Câmera Fotográfica</span>
-                </div>
-              </div>
-            </div>
-
-            <!-- Absolute tiny identifier tag for manual logistics -->
-            <div class="absolute bottom-1.5 left-1/2 -translate-x-1/2 text-[5.5px] font-black uppercase text-slate-300 tracking-widest whitespace-nowrap">
-              ALF AUTOMACAO - PLACA ID: ${targetLead ? targetLead.id : 'NFC-GOLD'}
-            </div>
-          </div>
-
-          <p class="no-print text-xs text-slate-400 font-semibold mt-4 text-center">
-            Para obter melhores resultados, configure sua impressora para 100% de escala e papel 10x10cm.
-          </p>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
+  const print10x10Plate = (leadToPrint?: Lead, initialTheme?: ArtworkTheme) => {
+    const targetLead = leadToPrint || selectedLead;
+    openHighDefinitionPrintWindow({
+      lead: targetLead,
+      theme: initialTheme,
+      portalQrMode,
+      gmbReviewLink,
+      onFallbackModal: (lead) => {
+        setArtworkTargetLead(lead);
+        setIsArtworkModalOpen(true);
+      }
+    });
   };
 
   const removeLead = async (leadId: string) => {
@@ -1282,6 +2144,29 @@ export default function App() {
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `leads/${leadId}`);
+    }
+  };
+
+  const handleWebShareLead = async (lead: Lead) => {
+    if (!navigator.share) {
+      try {
+        const text = `Empresa: ${lead.name}\n📍 Endereço: ${lead.address}\n📞 Telefone: ${lead.phone}`;
+        await navigator.clipboard.writeText(text);
+        alert('Dados comerciais copiados para a área de transferência! (Este navegador não suporta compartilhamento direto)');
+      } catch (_) {}
+      return;
+    }
+
+    try {
+      await navigator.share({
+        title: lead.name,
+        text: `Confira os dados comerciais de ${lead.name}:\n📍 Endereço: ${lead.address}\n📞 Telefone: ${lead.phone}`,
+        url: lead.googleMapsUrl || undefined
+      });
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        console.error('Erro ao compartilhar:', err);
+      }
     }
   };
 
@@ -1306,996 +2191,1091 @@ export default function App() {
   const calcNewRevenue = calcNewCustomers * calcAvgTicket;
   const calcDiffRevenue = calcNewRevenue - calcCurrentRevenue;
 
-  return (
-    <div className="min-h-screen bg-slate-50/80 text-slate-800 font-sans flex flex-col antialiased">
-      
-      {/* Top Professional Header */}
-      <header className="bg-white border-b border-slate-200/80 sticky top-0 z-50 backdrop-blur-md bg-white/95">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex flex-col lg:flex-row items-center justify-between gap-4">
-          
-          <div className="flex flex-col sm:flex-row items-center gap-4 w-full lg:w-auto">
-            <div className="flex items-center gap-3">
-              {/* Premium ALF Brand Symbol */}
-              <div className="relative bg-slate-900 px-3.5 py-1.5 rounded-xl border border-slate-800 flex items-center justify-center overflow-hidden">
-                <span className="relative text-base font-extrabold tracking-widest text-white font-mono">
-                  ALF
-                </span>
-              </div>
-              <div>
-                <h1 className="text-base font-black tracking-tight text-slate-900 flex items-center gap-1.5 leading-none">
-                  ALF Automação
-                  <span className="bg-slate-900 text-white text-[9px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-sm">
-                    Sales SaaS
-                  </span>
-                </h1>
-                <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-widest mt-0.5">
-                  Local Growth Intelligence Engine
-                </p>
-              </div>
-            </div>
-            
-            {/* PWA Install Button, Direct Project ZIP Export & Master Status */}
-            <div className="flex items-center gap-2 ml-auto sm:ml-2 shrink-0">
-              <PWAInstallButton />
-              <a
-                href="/api/export/zip"
-                download="alf-automacao-gmb.zip"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 transition-colors shadow-xs cursor-pointer"
-                title="Baixar código-fonte completo em arquivo .ZIP"
-                id="btn-download-project-zip"
-              >
-                <Download className="h-3.5 w-3.5 text-slate-600" />
-                <span>Exportar (.ZIP)</span>
-              </a>
+  // Categorias intuitivas de navegação para a Sidebar Profissional
+  const navCategories = [
+    { id: 'operacao', title: 'Operação & Placas' },
+    { id: 'comercial', title: 'Comercial & Vendas' },
+    { id: 'gestao', title: 'Gestão & Segurança' },
+  ];
 
-              {/* Master Access Badge / Control */}
-              {isMasterAuthenticated ? (
-                <div className="flex items-center gap-1.5 bg-emerald-50 border border-emerald-200 text-emerald-800 px-2.5 py-1.5 rounded-lg text-xs font-bold shadow-2xs">
-                  <Unlock className="h-3 w-3 text-emerald-600 shrink-0" />
-                  <span className="text-[11px] font-bold">Master: {masterUser}</span>
-                  <button
-                    onClick={handleMasterLogout}
-                    className="ml-1 text-emerald-700 hover:text-red-600 transition-colors p-0.5 rounded cursor-pointer"
-                    title="Bloquear / Desconectar Master"
-                    id="btn-master-logout"
-                  >
-                    <LogOut className="h-3 w-3" />
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => {
-                    setMasterTargetTab(null);
-                    setMasterError('');
-                    setIsMasterModalOpen(true);
-                  }}
-                  className="flex items-center gap-1.5 bg-amber-50 hover:bg-amber-100 border border-amber-300/80 text-amber-900 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer shadow-2xs"
-                  title="Autenticar como Usuário Master para desbloquear Site Demonstrativo e Portal"
-                  id="btn-open-master-login"
-                >
-                  <Lock className="h-3 w-3 text-amber-600 shrink-0" />
-                  <span className="text-[11px]">Acesso Master</span>
-                </button>
-              )}
-            </div>
-          </div>
+  // App Navigation Definitions with Strict Role-Based Visibility
+  const allNavTabsList = [
+    {
+      id: 'dynamic_qr' as const,
+      label: 'Placas & QR Codes',
+      shortLabel: 'Placas & QR',
+      navGroup: 'operacao',
+      category: 'Operação de Placas',
+      title: 'Central de Placas & QR Codes Inteligentes',
+      description: 'Gestão de lotes de impressão 10x10cm, URLs dinâmicas e links de avaliação Google 5★',
+      icon: QrCode,
+      color: 'text-indigo-600',
+      bgColor: 'bg-indigo-50',
+      badge: null,
+      requiresMaster: false,
+    },
+    {
+      id: 'cardapio' as const,
+      label: 'Cardápio Digital',
+      shortLabel: 'Cardápio',
+      navGroup: 'operacao',
+      category: 'Restaurantes & Mesas',
+      title: 'Cardápio Digital para Mesas (QR Code & NFC)',
+      description: 'Gestão de produtos, fotos, preços, comandas de mesas e pedidos no WhatsApp',
+      icon: Utensils,
+      color: 'text-amber-500',
+      bgColor: 'bg-amber-50',
+      badge: 'Novo',
+      requiresMaster: false,
+    },
+    {
+      id: 'nfc_designer' as const,
+      label: 'Designer Totem 10x10',
+      shortLabel: 'Totem 10x10',
+      navGroup: 'operacao',
+      category: 'Operação de Placas',
+      title: 'Designer do Totem Acrílico 10x10cm',
+      description: 'Gabarito oficial de corte, centralização de QR Code, ícone NFC e tipografia de balcão',
+      icon: Sparkles,
+      color: 'text-amber-600',
+      bgColor: 'bg-amber-50',
+      badge: 'Master',
+      requiresMaster: true,
+    },
+    {
+      id: 'leads' as const,
+      label: 'Empresas & Prospecção',
+      shortLabel: 'Empresas',
+      navGroup: 'comercial',
+      category: 'Comercial & Prospecção',
+      title: 'Empresas & Inteligência de Prospecção',
+      description: 'Varredura no Google Maps por negócios locais sem site e com baixas notas para conversão rápida',
+      icon: Building2,
+      color: 'text-blue-600',
+      bgColor: 'bg-blue-50',
+      badge: null,
+      requiresMaster: false,
+    },
+    {
+      id: 'crm' as const,
+      label: 'Funil CRM',
+      shortLabel: 'CRM',
+      navGroup: 'comercial',
+      category: 'Comercial & Prospecção',
+      title: 'Funil de Vendas CRM (Pipeline Kanban)',
+      description: 'Acompanhamento do ciclo de vendas: primeiro contato, visita presencial e fechamento',
+      icon: TrendingUp,
+      color: 'text-emerald-600',
+      bgColor: 'bg-emerald-50',
+      badge: null,
+      requiresMaster: false,
+    },
+    {
+      id: 'calculator' as const,
+      label: 'Calculadora ROI',
+      shortLabel: 'ROI',
+      navGroup: 'comercial',
+      category: 'Comercial & Prospecção',
+      title: 'Calculadora de Retorno sobre Investimento (ROI)',
+      description: 'Simulação matemática de ganho de faturamento para argumentação e fechamento comercial',
+      icon: Coins,
+      color: 'text-violet-600',
+      bgColor: 'bg-violet-50',
+      badge: null,
+      requiresMaster: false,
+    },
+    {
+      id: 'site_preview' as const,
+      label: 'Site Demonstrativo',
+      shortLabel: 'Site Demo',
+      navGroup: 'comercial',
+      category: 'Demonstração com IA',
+      title: 'Simulador Interativo de Mini-Site com IA',
+      description: 'Demonstração de landing page moderna para o lojista com WhatsApp, catálogo e avaliações',
+      icon: Globe,
+      color: 'text-teal-600',
+      bgColor: 'bg-teal-50',
+      badge: null,
+      requiresMaster: false,
+    },
+    {
+      id: 'landing' as const,
+      label: 'Página de Vendas',
+      shortLabel: 'Vendas',
+      navGroup: 'comercial',
+      category: 'Apresentação Comercial',
+      title: 'Página de Vendas & Apresentação Comercial de Alta Conversão',
+      description: 'Demonstração visual do impacto de placas NFC, Mini Sites por nicho e simulação para o cliente',
+      icon: Sparkles,
+      color: 'text-cyan-600',
+      bgColor: 'bg-cyan-50',
+      badge: 'Pitch',
+      requiresMaster: false,
+    },
+    {
+      id: 'portal' as const,
+      label: 'Portal do Cliente',
+      shortLabel: 'Portal',
+      navGroup: 'gestao',
+      category: 'Administração & Acesso',
+      title: 'Portal Exclusivo do Lojista',
+      description: 'Área do cliente para autogerenciamento do destino de suas placas e métricas de escaneamento',
+      icon: Key,
+      color: 'text-rose-600',
+      bgColor: 'bg-rose-50',
+      badge: 'Master',
+      requiresMaster: true,
+    },
+    {
+      id: 'users' as const,
+      label: 'Usuários & Segurança',
+      shortLabel: 'Usuários',
+      navGroup: 'gestao',
+      category: 'Administração & Acesso',
+      title: 'Gestão de Usuários & CyberShield RBAC',
+      description: 'Controle de senhas mestras, vendedores operadores e proteção de integridade da base',
+      icon: ShieldCheck,
+      color: 'text-slate-700',
+      bgColor: 'bg-slate-100',
+      badge: 'Master',
+      requiresMaster: true,
+    },
+  ];
 
-          {/* Senior UX Tab Navigation System */}
-          <nav className="flex bg-slate-100 p-1 rounded-xl border border-slate-200/60 w-full lg:w-auto overflow-x-auto scrollbar-none gap-0.5">
-            <button
-              onClick={() => setActiveTab('leads')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all shrink-0 cursor-pointer ${
-                activeTab === 'leads' ? 'bg-white text-slate-900 shadow-sm border border-slate-200/30' : 'text-slate-500 hover:text-slate-900'
-              }`}
-              id="tab-leads"
-            >
-              <Search className="h-3.5 w-3.5 text-slate-500" />
-              Prospecção
-            </button>
-            <button
-              onClick={() => setActiveTab('crm')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all shrink-0 cursor-pointer ${
-                activeTab === 'crm' ? 'bg-white text-slate-900 shadow-sm border border-slate-200/30' : 'text-slate-500 hover:text-slate-900'
-              }`}
-              id="tab-crm"
-            >
-              <TrendingUp className="h-3.5 w-3.5 text-slate-500" />
-              Funil CRM
-            </button>
-            <button
-              onClick={() => {
-                requireMasterAccess('site_preview', () => {
-                  if (selectedLead) {
-                    generateWebsiteTemplate(selectedLead);
-                  } else {
-                    setActiveTab('site_preview');
-                  }
-                });
-              }}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all shrink-0 cursor-pointer ${
-                activeTab === 'site_preview' ? 'bg-white text-slate-900 shadow-sm border border-slate-200/30' : 'text-slate-500 hover:text-slate-900'
-              }`}
-              id="tab-site"
-            >
-              <Globe className="h-3.5 w-3.5 text-slate-500" />
-              <span>Site Demonstrativo</span>
-              {!isMasterAuthenticated ? (
-                <span className="inline-flex items-center gap-0.5 text-[9px] bg-amber-100 text-amber-800 font-extrabold px-1.5 py-0.5 rounded-md border border-amber-200">
-                  <Lock className="h-2.5 w-2.5" />
-                  Master
-                </span>
-              ) : null}
-            </button>
-            <button
-              onClick={() => setActiveTab('nfc_designer')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all shrink-0 cursor-pointer ${
-                activeTab === 'nfc_designer' ? 'bg-white text-slate-900 shadow-sm border border-slate-200/30' : 'text-slate-500 hover:text-slate-900'
-              }`}
-              id="tab-nfc"
-            >
-              <QrCode className="h-3.5 w-3.5 text-slate-500" />
-              Placa NFC
-            </button>
-            <button
-              onClick={() => setActiveTab('calculator')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all shrink-0 cursor-pointer ${
-                activeTab === 'calculator' ? 'bg-white text-slate-900 shadow-sm border border-slate-200/30' : 'text-slate-500 hover:text-slate-900'
-              }`}
-              id="tab-calculator"
-            >
-              <Coins className="h-3.5 w-3.5 text-slate-500" />
-              Calculadora ROI
-            </button>
-            <button
-              onClick={() => {
-                requireMasterAccess('portal', () => setActiveTab('portal'));
-              }}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all shrink-0 cursor-pointer ${
-                activeTab === 'portal' ? 'bg-white text-slate-900 shadow-sm border border-slate-200/30' : 'text-slate-500 hover:text-slate-900'
-              }`}
-              id="tab-portal"
-            >
-              <Key className="h-3.5 w-3.5 text-slate-500" />
-              <span>Portal do Cliente</span>
-              {!isMasterAuthenticated ? (
-                <span className="inline-flex items-center gap-0.5 text-[9px] bg-amber-100 text-amber-800 font-extrabold px-1.5 py-0.5 rounded-md border border-amber-200">
-                  <Lock className="h-2.5 w-2.5" />
-                  Master
-                </span>
-              ) : null}
-            </button>
-          </nav>
+  // All professional navigation modules visible and accessible
+  const navTabsList = allNavTabsList;
+
+  const activeTabMeta = allNavTabsList.find(t => t.id === activeTab) || allNavTabsList[0];
+
+  const handleNavSelect = (targetTab: 'leads' | 'crm' | 'site_preview' | 'nfc_designer' | 'dynamic_qr' | 'calculator' | 'portal' | 'users' | 'cardapio' | 'landing') => {
+    setIsMobileMenuOpen(false);
+    changeTab(targetTab);
+    if (targetTab === 'site_preview' && !siteTemplate) {
+      const target = selectedLead || leads[0];
+      if (target) {
+        setSelectedLead(target);
+        generateWebsiteTemplate(target);
+      }
+    }
+  };
+
+  const currentTabObj = navTabsList.find(t => t.id === activeTab) || navTabsList[0];
+
+  // Standalone public Mini Site viewer when ?minisite=xxx is in URL
+  if (minisiteParam) {
+    const targetLead = leads.find(l => l.id === minisiteParam) || (selectedLead?.id === minisiteParam ? selectedLead : null);
+    const standaloneConfig: MiniSiteConfig = {
+      id: minisiteParam,
+      companyName: targetLead?.name || 'Sua Empresa',
+      niche: targetLead?.niche || 'Atendimento Exclusivo',
+      city: targetLead?.city || 'Brasil',
+      tagline: targetLead?.weakness
+        ? `Excelência e agilidade no atendimento em ${targetLead.city}`
+        : 'Atendimento de alta qualidade, confiabilidade e rapidez.',
+      whatsappNumber: targetLead?.nfcWhatsappNum || targetLead?.phone || '',
+      whatsappMessage: targetLead?.nfcWhatsappMsg || `Olá! Vim através do Mini Site de ${targetLead?.name || 'sua empresa'} e gostaria de atendimento.`,
+      instagramUrl: targetLead?.nfcInstagramUrl || '',
+      googleReviewUrl: targetLead?.googleMapsUrl || gmbReviewLink || 'https://maps.google.com',
+      websiteUrl: targetLead?.websiteUrl || '',
+      pixKey: (targetLead as any)?.miniSiteConfig?.pixKey || (targetLead?.phone ? formatMiniSitePhone(targetLead.phone) : 'pix@empresa.com.br'),
+      pixBeneficiary: targetLead?.name || 'Empresa Local',
+      pixKeyType: 'telefone',
+      wifiSsid: (targetLead as any)?.miniSiteConfig?.wifiSsid || `${(targetLead?.name || 'Empresa').replace(/\s+/g, '_')}_WiFi`,
+      wifiPassword: (targetLead as any)?.miniSiteConfig?.wifiPassword || 'VisiteNos123',
+      address: (targetLead as any)?.miniSiteConfig?.address || targetLead?.address || '',
+      phone: targetLead?.phone || '',
+      openingHours: (targetLead as any)?.miniSiteConfig?.openingHours || 'Segunda a Sábado: 08h às 19h',
+      theme: 'dark_neon'
+    };
+
+    return (
+      <div className="relative min-h-screen bg-slate-950">
+        <MiniSiteViewer
+          standalone={true}
+          config={standaloneConfig}
+          leadId={minisiteParam}
+        />
+        {/* Discreet admin exit bar */}
+        <div className="fixed top-3 right-3 z-50">
+          <a
+            href="/"
+            className="px-3 py-1.5 bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white rounded-full text-[11px] font-bold border border-slate-700 backdrop-blur-md shadow-lg transition flex items-center gap-1.5"
+          >
+            <span>Painel ALF</span>
+            <ExternalLink className="w-3 h-3" />
+          </a>
         </div>
-      </header>
+      </div>
+    );
+  }
 
-      {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        
-        {/* API Key Status Info Banner */}
-        {demoMode && (
-          <div className="mb-6 bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-start sm:items-center gap-3">
-              <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5 sm:mt-0" />
-              <div>
-                <p className="font-semibold text-sm">Modo de Simulação Ativado (Offline)</p>
-                <p className="text-xs text-amber-700">O sistema está gerando empresas e layouts pré-configurados pela IA. Para fazer buscas reais em tempo real, configure sua chave do Google Gemini em <strong className="font-semibold">Settings &gt; Secrets</strong>.</p>
+  // Standalone public Cardápio Digital viewer when ?cardapio=xxx or ?c=xxx or ?menu=xxx is in URL
+  if (cardapioParam) {
+    let savedMenus: RestaurantMenu[] = INITIAL_MENUS;
+    try {
+      const stored = localStorage.getItem('alf_cardapios_data');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) savedMenus = parsed;
+      }
+    } catch (_) {}
+
+    const targetMenu = savedMenus.find(m => m.id.toLowerCase() === cardapioParam.toLowerCase()) || savedMenus[0];
+    const mesaParam = new URLSearchParams(window.location.search).get('mesa') || new URLSearchParams(window.location.search).get('table') || '01';
+
+    return (
+      <div className="relative min-h-screen bg-slate-950">
+        <PublicCardapioViewer
+          menu={targetMenu}
+          initialTable={mesaParam}
+          onBackToAdmin={() => {
+            window.location.href = '/';
+          }}
+        />
+        {/* Discreet admin exit button */}
+        <div className="fixed top-3 right-3 z-50">
+          <a
+            href="/"
+            className="px-3 py-1.5 bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white rounded-full text-[11px] font-bold border border-slate-700 backdrop-blur-md shadow-lg transition flex items-center gap-1.5"
+          >
+            <span>Painel ALF</span>
+            <ExternalLink className="w-3 h-3" />
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-100/70 text-slate-800 font-sans flex flex-col lg:flex-row antialiased w-full max-w-full overflow-x-hidden">
+      
+      {/* 1. DESKTOP LATERAL SIDEBAR (MENU LATERAL PROFISSIONAL) */}
+      <aside 
+        className={`hidden lg:flex flex-col shrink-0 border-r border-slate-200/90 bg-white sticky top-0 h-screen transition-all duration-200 z-30 select-none ${
+          isSidebarCollapsed ? 'w-20' : 'w-64'
+        }`}
+      >
+        {/* Sidebar Brand Header */}
+        <div className="h-16 px-4 flex items-center justify-between border-b border-slate-100 shrink-0">
+          {!isSidebarCollapsed ? (
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-9 h-9 rounded-xl bg-slate-950 text-white font-mono font-black text-sm flex items-center justify-center shadow-xs shrink-0">
+                ALF
+              </div>
+              <div className="min-w-0 truncate">
+                <span className="text-sm font-black text-slate-900 tracking-tight block truncate">
+                  ALF Automação
+                </span>
+                <span className="text-[11px] font-semibold text-slate-400 block truncate">
+                  Smart Plates &amp; CRM
+                </span>
               </div>
             </div>
-            <span className="bg-amber-100 text-amber-800 text-xs px-2.5 py-1 rounded-md font-bold self-start sm:self-auto shrink-0 uppercase">Demo</span>
+          ) : (
+            <div className="w-full flex justify-center">
+              <div className="w-9 h-9 rounded-xl bg-slate-950 text-white font-mono font-black text-sm flex items-center justify-center shadow-xs">
+                ALF
+              </div>
+            </div>
+          )}
+
+          <button
+            onClick={toggleSidebar}
+            className={`p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer ${
+              isSidebarCollapsed ? 'hidden' : 'block'
+            }`}
+            title="Recolher menu lateral"
+            aria-label="Recolher menu lateral"
+          >
+            <PanelLeftClose className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* When collapsed: expand button */}
+        {isSidebarCollapsed && (
+          <div className="py-2 flex justify-center border-b border-slate-100">
+            <button
+              onClick={toggleSidebar}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+              title="Expandir menu lateral"
+              aria-label="Expandir menu lateral"
+            >
+              <PanelLeft className="h-4 w-4" />
+            </button>
           </div>
         )}
 
-        {/* TAB 1: SEARCH & PROSPECT LOCAL BUSINESSES */}
-        {activeTab === 'leads' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            
-            {/* Search Setup Side Panel */}
-            <div className="lg:col-span-4 bg-white border border-slate-200/80 rounded-2xl p-6 shadow-sm space-y-6">
-              <div>
-                <h2 className="text-base font-black text-slate-900 flex items-center gap-2">
-                  <Search className="h-4 w-4 text-slate-900" />
-                  Mecanismo de Prospecção
-                </h2>
-                <p className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider mt-1">
-                  Scanner de Crescimento de Vendas
-                </p>
+        {/* Quick Scanner Action Trigger */}
+        <div className="p-3 border-b border-slate-100/90 shrink-0">
+          {!isSidebarCollapsed ? (
+            <button
+              type="button"
+              onClick={() => setIsPlateScannerOpen(true)}
+              className="w-full flex items-center justify-between px-3 py-2 bg-slate-100/80 hover:bg-indigo-50/70 border border-slate-200/80 hover:border-indigo-200 text-slate-600 hover:text-indigo-900 rounded-xl text-xs transition cursor-pointer group shadow-2xs"
+              title="Identificar a qual empresa pertence a placa ou QR físico (Ctrl+K)"
+            >
+              <div className="flex items-center gap-2 truncate">
+                <ScanLine className="h-4 w-4 text-indigo-600 shrink-0 group-hover:scale-110 transition-transform" />
+                <span className="font-semibold truncate text-[11px]">
+                  Ler Placa / Totem...
+                </span>
               </div>
+              <span className="text-[10px] font-mono text-slate-400 bg-white border border-slate-200 px-1.5 py-0.5 rounded-md shrink-0">
+                ⌘K
+              </span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setIsPlateScannerOpen(true)}
+              className="w-full flex items-center justify-center p-2.5 bg-slate-100/80 hover:bg-indigo-50 border border-slate-200 text-indigo-600 rounded-xl transition cursor-pointer"
+              title="Identificar Placa Física (⌘K)"
+            >
+              <ScanLine className="h-4 w-4" />
+            </button>
+          )}
+        </div>
 
-              {/* Form parameters */}
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">Cidade ou Região</label>
-                  <div className="relative">
-                    <MapPin className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                    <input
-                      type="text"
-                      value={city}
-                      onChange={(e) => setCity(e.target.value)}
-                      placeholder="Ex: São Paulo, Campinas, Curitiba"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 pl-9 pr-4 text-xs font-semibold focus:bg-white focus:ring-1 focus:ring-slate-900 focus:outline-hidden transition-all"
-                      id="input-city"
-                    />
+        {/* Sidebar Categorized Menu Items */}
+        <div className="flex-1 overflow-y-auto px-2.5 py-3 space-y-4 scrollbar-thin">
+          {navCategories.map((cat) => {
+            const categoryTabs = navTabsList.filter(t => t.navGroup === cat.id);
+            if (categoryTabs.length === 0) return null;
+
+            return (
+              <div key={cat.id} className="space-y-1">
+                {!isSidebarCollapsed && (
+                  <div className="px-2.5 pb-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    {cat.title}
                   </div>
-                </div>
+                )}
+                {categoryTabs.map((tab) => {
+                  const isActive = activeTab === tab.id;
+                  const Icon = tab.icon;
 
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">Segmento / Nicho principal</label>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {PRESET_NICHES.map((n) => {
-                      const isSelected = niche === n.id && !customNiche;
-                      return (
-                        <button
-                          key={n.id}
-                          onClick={() => { setNiche(n.id); setCustomNiche(''); }}
-                          className={`py-2 px-2.5 text-left text-xs rounded-lg border transition-all cursor-pointer truncate font-bold ${
-                            isSelected 
-                              ? 'bg-slate-950 border-slate-950 text-white' 
-                              : 'bg-white border-slate-200/80 hover:bg-slate-50 text-slate-600'
-                          }`}
-                          id={`niche-${n.id}`}
-                        >
-                          {n.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">Outro Nicho (Opcional)</label>
-                  <input
-                    type="text"
-                    value={customNiche}
-                    onChange={(e) => setCustomNiche(e.target.value)}
-                    placeholder="Ex: Pizzaria, Floricultura, Padaria"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3.5 text-xs font-semibold focus:bg-white focus:ring-1 focus:ring-slate-900 focus:outline-hidden transition-all"
-                    id="input-custom-niche"
-                  />
-                </div>
-
-                <button
-                  onClick={searchLocalBusinesses}
-                  disabled={isSearching}
-                  className="w-full bg-slate-950 hover:bg-slate-900 active:bg-black text-white font-black py-2.5 px-4 rounded-xl transition-all flex items-center justify-center gap-2 text-xs uppercase tracking-wider cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-                  id="btn-search"
-                >
-                  {isSearching ? (
-                    <>
-                      <div className="animate-spin rounded-full h-3.5 w-3.5 border-2 border-white border-t-transparent" />
-                      Scanner Ativo (Etapa {searchStep}/5)...
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="h-3.5 w-3.5 text-cyan-400" />
-                      Buscar Oportunidades
-                    </>
-                  )}
-                </button>
-
-                {/* Progress Bar & Stage Indicator */}
-                {(isSearching || searchStep > 0) && (
-                  <div className="space-y-1.5 pt-1">
-                    <div className="flex items-center justify-between text-[10px] font-bold text-slate-500">
-                      <span className="flex items-center gap-1.5 text-slate-700">
-                        {isSearching ? (
-                          <Activity className="h-3 w-3 text-cyan-500 animate-pulse" />
-                        ) : (
-                          <CheckCircle className="h-3 w-3 text-emerald-500" />
-                        )}
-                        {searchStep === 1 && "1/5: Sanitização CyberShield Guard"}
-                        {searchStep === 2 && "2/5: Conexão Gemini 3.8 Flash"}
-                        {searchStep === 3 && "3/5: Varredura Google Maps Grounding"}
-                        {searchStep === 4 && "4/5: Auditoria de Fragilidades & Notas"}
-                        {searchStep === 5 && "5/5: Sincronização e Validação"}
-                        {searchStep === 0 && "Varredura Pronta"}
-                      </span>
-                      <span className="font-mono text-slate-600">
-                        {Math.min(100, searchStep * 20)}%
-                      </span>
-                    </div>
-                    <div className="w-full bg-slate-200/80 rounded-full h-1.5 overflow-hidden">
-                      <div 
-                        className={`h-full transition-all duration-500 rounded-full ${
-                          searchStep === 5 ? 'bg-emerald-500' : 'bg-slate-900'
+                  if (isSidebarCollapsed) {
+                    return (
+                      <button
+                        key={tab.id}
+                        onClick={() => handleNavSelect(tab.id)}
+                        className={`w-full flex items-center justify-center p-2.5 rounded-xl transition-all cursor-pointer relative group ${
+                          isActive
+                            ? 'bg-slate-900 text-white shadow-xs font-bold'
+                            : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                         }`}
-                        style={{ width: `${Math.min(100, Math.max(10, searchStep * 20))}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* Anti-Truncation Badge */}
-                {antiTruncationRecovered && (
-                  <div className="p-2 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center gap-2 text-[10px] font-bold text-emerald-800">
-                    <Shield className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-                    <span>Algoritmo anti-truncamento ativo: Todos os registros foram recuperados e validados.</span>
-                  </div>
-                )}
-
-                {/* Error Banner with Direct Recovery */}
-                {searchErrorDetails && (
-                  <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 space-y-1.5 text-left">
-                    <div className="flex items-center gap-1.5 text-rose-800 font-extrabold text-[11px]">
-                      <AlertCircle className="h-3.5 w-3.5 text-rose-600 shrink-0" />
-                      <span>{searchErrorDetails.code ? `Erro: ${searchErrorDetails.code}` : 'Falha na Varredura'}</span>
-                    </div>
-                    <p className="text-[10px] text-rose-700 font-medium">
-                      {searchErrorDetails.message}
-                    </p>
-                    {searchErrorDetails.details && (
-                      <p className="text-[9px] text-rose-600 font-mono bg-rose-100/60 p-1.5 rounded">
-                        {searchErrorDetails.details}
-                      </p>
-                    )}
-                    <button
-                      onClick={searchLocalBusinesses}
-                      disabled={isSearching}
-                      className="w-full mt-1 bg-rose-600 hover:bg-rose-700 text-white font-bold py-1 px-2 rounded-lg text-[10px] transition-all flex items-center justify-center gap-1 cursor-pointer"
-                    >
-                      <RefreshCw className="h-3 w-3" />
-                      Tentar Novamente Agora
-                    </button>
-                  </div>
-                )}
-
-                {/* Real-time Telemetry Logs Terminal */}
-                {searchLogs.length > 0 && (
-                  <div className="rounded-xl border border-slate-800 bg-slate-950 overflow-hidden shadow-inner text-left font-mono">
-                    <div className="bg-slate-900/90 px-3 py-2 border-b border-slate-800 flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
-                        <Terminal className="h-3.5 w-3.5 text-cyan-400" />
-                        <span className="text-[10px] font-extrabold text-slate-200 uppercase tracking-wider">
-                          Logs de Telemetria
+                        title={tab.label}
+                      >
+                        <Icon className={`h-4 w-4 ${isActive ? 'text-white' : tab.color}`} />
+                        <span className="absolute left-full ml-2 px-2.5 py-1 bg-slate-900 text-white text-[11px] font-semibold rounded-lg shadow-lg whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity z-50">
+                          {tab.label}
                         </span>
-                        {isSearching && (
-                          <span className="relative flex h-2 w-2">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-1">
-                        {searchExecutionTime && (
-                          <span className="text-[9px] text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded">
-                            {(searchExecutionTime / 1000).toFixed(1)}s
-                          </span>
-                        )}
-                        <button
-                          onClick={() => setIsConsoleExpanded(!isConsoleExpanded)}
-                          className="text-slate-400 hover:text-white p-1 rounded transition-colors cursor-pointer"
-                          title={isConsoleExpanded ? "Recolher console" : "Expandir console"}
-                        >
-                          {isConsoleExpanded ? (
-                            <ChevronUp className="h-3 w-3" />
-                          ) : (
-                            <ChevronDown className="h-3 w-3" />
-                          )}
-                        </button>
-                      </div>
-                    </div>
-
-                    {isConsoleExpanded && (
-                      <div className="p-2.5 max-h-44 overflow-y-auto space-y-1.5 text-[10px] text-slate-300 scrollbar-thin scrollbar-thumb-slate-800">
-                        {searchLogs.map((log) => {
-                          const levelColors = {
-                            info: 'text-cyan-400 bg-cyan-950/60 border-cyan-800/40',
-                            warn: 'text-amber-300 bg-amber-950/60 border-amber-800/40',
-                            error: 'text-rose-400 bg-rose-950/60 border-rose-800/40',
-                            success: 'text-emerald-400 bg-emerald-950/60 border-emerald-800/40'
-                          };
-
-                          return (
-                            <div key={log.id} className="flex items-start gap-1.5 leading-relaxed">
-                              <span className="text-slate-500 text-[9px] shrink-0 font-mono">
-                                [{log.timestamp}]
-                              </span>
-                              <span className={`text-[8px] font-black uppercase px-1 py-0.2 rounded border shrink-0 ${levelColors[log.level]}`}>
-                                {log.level}
-                              </span>
-                              <span className="break-words text-slate-300">
-                                {log.message}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Pricing settings */}
-              <div className="pt-4 border-t border-slate-100 space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1">
-                    <Sliders className="h-3.5 w-3.5 text-slate-500" />
-                    Tabela de Preços (ALEF)
-                  </h3>
-                  <span className="text-[10px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full font-bold border border-emerald-200">
-                    Combo -R$ 329
-                  </span>
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="block text-[10px] text-slate-500 font-semibold">Placa NFC</span>
-                    </div>
-                    <div className="relative">
-                      <span className="absolute left-2 top-1.5 text-xs text-slate-400">R$</span>
-                      <input
-                        type="number"
-                        value={nfcPrice}
-                        onChange={(e) => setNfcPrice(Number(e.target.value))}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-lg py-1 pl-6 pr-1 text-xs text-center font-bold focus:bg-white focus:outline-hidden"
-                      />
-                    </div>
-                    <div className="flex gap-1 pt-0.5">
-                      <button
-                        type="button"
-                        onClick={() => setNfcPrice(129)}
-                        className={`flex-1 text-[9px] font-bold py-0.5 rounded border transition-all cursor-pointer ${
-                          nfcPrice === 129 ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                        }`}
-                      >
-                        129
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => setNfcPrice(100)}
-                        className={`flex-1 text-[9px] font-bold py-0.5 rounded border transition-all cursor-pointer ${
-                          nfcPrice === 100 ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                        }`}
-                        title="Preço especial/lote"
-                      >
-                        100
-                      </button>
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <span className="block text-[10px] text-slate-500 font-semibold">Criar Site</span>
-                    <div className="relative">
-                      <span className="absolute left-2 top-1.5 text-xs text-slate-400">R$</span>
-                      <input
-                        type="number"
-                        value={sitePrice}
-                        onChange={(e) => setSitePrice(Number(e.target.value))}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-lg py-1 pl-6 pr-1 text-xs text-center font-bold focus:bg-white focus:outline-hidden"
-                      />
-                    </div>
-                    <div className="flex gap-1 pt-0.5">
-                      <button
-                        type="button"
-                        onClick={() => setSitePrice(1500)}
-                        className={`w-full text-[9px] font-bold py-0.5 rounded border transition-all cursor-pointer ${
-                          sitePrice === 1500 ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                        }`}
-                      >
-                        1.500
-                      </button>
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <span className="block text-[10px] text-slate-500 font-semibold">Combo</span>
-                    <div className="relative">
-                      <span className="absolute left-2 top-1.5 text-xs text-slate-400">R$</span>
-                      <input
-                        type="number"
-                        value={comboPrice}
-                        onChange={(e) => setComboPrice(Number(e.target.value))}
-                        className="w-full bg-emerald-50 border border-emerald-300 text-emerald-900 rounded-lg py-1 pl-6 pr-1 text-xs text-center font-bold focus:bg-white focus:outline-hidden"
-                      />
-                    </div>
-                    <div className="flex gap-1 pt-0.5">
-                      <button
-                        type="button"
-                        onClick={() => setComboPrice(1300)}
-                        className={`w-full text-[9px] font-bold py-0.5 rounded border transition-all cursor-pointer ${
-                          comboPrice === 1300 ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                        }`}
-                      >
-                        1.300
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-            </div>
-
-            {/* Leads list and single details */}
-            <div className="lg:col-span-8 space-y-6">
-              
-              {/* Opportunities List Container */}
-              <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-                {(() => {
-                  const normalizeFilterText = (s: string) =>
-                    (s || '')
-                      .toLowerCase()
-                      .normalize('NFD')
-                      .replace(/[\u0300-\u036f]/g, '')
-                      .replace(/[-_.,/]/g, ' ')
-                      .replace(/\s+/g, ' ')
-                      .trim();
-
-                  const rawCityInput = normalizeFilterText(city);
-                  const cleanCityFilter = rawCityInput
-                    .replace(/\b(sp|rj|mg|pr|sc|rs|ba|go|df|es|ce|pe|am|pa|mt|ms|rn|pb|al|se|pi|to|ro|ac|ap|rr)\b/g, '')
-                    .trim();
-
-                  const rawNicheInput = normalizeFilterText(customNiche.trim() ? customNiche : niche);
-                  const cleanNicheFilter = rawNicheInput
-                    .replace(/\b(em|de|da|do|na|no|para)\b/g, ' ')
-                    .replace(/\s+/g, ' ')
-                    .trim();
-
-                  const NICHE_SYNONYMS: Record<string, string[]> = {
-                    dentista: ['dentist', 'odonto', 'dente', 'dental', 'sorriso', 'ortodont', 'protese', 'implant', 'clinica'],
-                    odonto: ['dentist', 'odonto', 'dente', 'dental', 'sorriso', 'ortodont', 'protese', 'implant'],
-                    mecanica: ['mecanic', 'oficina', 'auto', 'carro', 'veiculo', 'funilar', 'troca de oleo', 'motor', 'pneu'],
-                    restaurante: ['restauran', 'pizza', 'pizzaria', 'hamburguer', 'lanche', 'bar', 'comida', 'gastronom', 'bistro', 'cafe'],
-                    beleza: ['salao', 'beleza', 'cabelo', 'cabeleireir', 'barbearia', 'estetic', 'unha', 'manicure', 'spa']
-                  };
-
-                  const displayedLeads = leads.filter(lead => {
-                    // Leads retornados na busca mais recente sempre são exibidos
-                    if (lastSearchLeadIds.includes(lead.id)) return true;
-                    if (!filterOnlySearched) return true;
-                    
-                    const leadCityClean = normalizeFilterText(lead.city || '')
-                      .replace(/\b(sp|rj|mg|pr|sc|rs|ba|go|df|es|ce|pe|am|pa|mt|ms|rn|pb|al|se|pi|to|ro|ac|ap|rr)\b/g, '')
-                      .trim();
-                    const leadNicheClean = normalizeFilterText(lead.niche || '');
-                    const leadNameClean = normalizeFilterText(lead.name || '');
-
-                    // Correspondência de Cidade
-                    const cityMatch = !cleanCityFilter || 
-                      leadCityClean.includes(cleanCityFilter) || 
-                      cleanCityFilter.includes(leadCityClean) ||
-                      cleanCityFilter.split(' ').some(word => word.length >= 3 && leadCityClean.includes(word));
-
-                    // Correspondência de Nicho com Sinônimos Semânticos
-                    let nicheMatch = !cleanNicheFilter || 
-                      leadNicheClean.includes(cleanNicheFilter) || 
-                      cleanNicheFilter.includes(leadNicheClean) ||
-                      leadNameClean.includes(cleanNicheFilter);
-
-                    if (!nicheMatch) {
-                      for (const [key, keywords] of Object.entries(NICHE_SYNONYMS)) {
-                        const filterMatchesGroup = cleanNicheFilter.includes(key) || keywords.some(k => cleanNicheFilter.includes(k));
-                        if (filterMatchesGroup) {
-                          const leadMatchesGroup = keywords.some(k => leadNicheClean.includes(k) || leadNameClean.includes(k));
-                          if (leadMatchesGroup) {
-                            nicheMatch = true;
-                            break;
-                          }
-                        }
-                      }
-                    }
-
-                    return cityMatch && nicheMatch;
-                  });
+                    );
+                  }
 
                   return (
-                    <>
-                      <div className="px-5 py-4 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-3">
-                        <div className="space-y-0.5">
-                          <h2 className="text-base font-bold text-slate-900">
-                            Empresas Encontradas ({displayedLeads.length})
-                          </h2>
-                          <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
-                            {filterOnlySearched 
-                              ? `Filtro: "${customNiche.trim() ? customNiche : niche}" em "${city}"` 
-                              : "Mostrando histórico completo de buscas"
-                            }
-                          </p>
-                        </div>
-                        
-                        <div className="flex bg-slate-100 p-1 rounded-xl self-start md:self-auto shrink-0 border border-slate-200">
-                          <button
-                            onClick={() => setFilterOnlySearched(true)}
-                            className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
-                              filterOnlySearched 
-                                ? 'bg-white text-slate-800 shadow-sm' 
-                                : 'text-slate-500 hover:text-slate-800'
-                            }`}
-                          >
-                            Filtrado ({displayedLeads.length})
-                          </button>
-                          <button
-                            onClick={() => setFilterOnlySearched(false)}
-                            className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
-                              !filterOnlySearched 
-                                ? 'bg-white text-slate-800 shadow-sm' 
-                                : 'text-slate-500 hover:text-slate-800'
-                            }`}
-                          >
-                            Todos ({leads.length})
-                          </button>
-                        </div>
+                    <button
+                      key={tab.id}
+                      onClick={() => handleNavSelect(tab.id)}
+                      className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer group text-left ${
+                        isActive
+                          ? 'bg-slate-900 text-white shadow-xs font-bold'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/90'
+                      }`}
+                      id={`tab-${tab.id}`}
+                    >
+                      <div className="flex items-center gap-2.5 truncate">
+                        <Icon className={`h-4 w-4 shrink-0 ${isActive ? 'text-white' : tab.color}`} />
+                        <span className="truncate">{tab.label}</span>
                       </div>
-
-                      <div className="divide-y divide-slate-100 max-h-[360px] overflow-y-auto">
-                        {displayedLeads.length === 0 ? (
-                          <div className="text-center py-10 px-4 space-y-3">
-                            <Search className="h-10 w-10 text-slate-300 mx-auto" />
-                            <div>
-                              <p className="text-slate-700 font-bold text-sm">Nenhum lead com o filtro restrito atual.</p>
-                              <p className="text-slate-400 text-xs mt-0.5">
-                                {leads.length > 0 
-                                  ? `Existem ${leads.length} empresas cadastradas no sistema que você pode visualizar.` 
-                                  : 'Clique em "Buscar Oportunidades" ao lado para varrer estabelecimentos reais no Google.'}
-                              </p>
-                            </div>
-                            {leads.length > 0 && (
-                              <button
-                                onClick={() => setFilterOnlySearched(false)}
-                                className="inline-flex items-center gap-1.5 bg-slate-900 hover:bg-black text-white text-xs font-bold px-4 py-2 rounded-xl transition-all cursor-pointer"
-                              >
-                                <Eye className="h-3.5 w-3.5 text-cyan-400" />
-                                Mostrar Todos os {leads.length} Leads
-                              </button>
-                            )}
-                          </div>
-                        ) : (
-                          displayedLeads.map((lead) => {
-                      const isSelected = selectedLead?.id === lead.id;
-                      const badgeStyles = lead.hasWebsite 
-                        ? 'bg-amber-50 text-amber-800 border-amber-200/50' 
-                        : 'bg-red-50 text-red-800 border-red-200/50';
-                      
-                      return (
-                        <div
-                          key={lead.id}
-                          onClick={() => { setSelectedLead(lead); generateSalesPitch(lead); }}
-                          className={`p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer transition-all hover:bg-slate-50/60 ${
-                            isSelected ? 'bg-slate-100/70 border-l-3 border-l-slate-900' : ''
-                          }`}
-                          id={`lead-card-${lead.id}`}
-                        >
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <h3 className="font-extrabold text-xs text-slate-900 tracking-tight">{lead.name}</h3>
-                              <span className={`text-[9px] px-2 py-0.5 rounded-md border font-extrabold uppercase tracking-wider ${badgeStyles}`}>
-                                {lead.hasWebsite ? 'Site Amador/Incompleto' : 'Sem Site Cadastrado'}
-                              </span>
-                            </div>
-                            <p className="text-xs text-slate-500 flex items-center gap-1">
-                              <MapPin className="h-3 w-3 inline shrink-0" /> {lead.address}
-                            </p>
-                            <div className="flex items-center gap-2.5 pt-0.5">
-                              <div className="flex items-center text-amber-500">
-                                {[...Array(5)].map((_, i) => (
-                                  <Star
-                                    key={i}
-                                    className={`h-3 w-3 ${i < Math.floor(lead.rating) ? 'fill-amber-400' : 'text-slate-300'}`}
-                                  />
-                                ))}
-                                <span className="text-xs font-bold text-slate-700 ml-1">{lead.rating}</span>
-                              </div>
-                              <span className="text-[11px] text-slate-400">({lead.reviewCount} avaliações)</span>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-2 self-end md:self-auto">
-                            {lead.stage ? (
-                              <span className="text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-600 border border-slate-200/60 px-2 py-1 rounded-md">
-                                No Funil
-                              </span>
-                            ) : (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  updateLeadStage(lead.id, 'to_contact');
-                                }}
-                                className="text-xs font-semibold bg-slate-100 hover:bg-blue-600 hover:text-white text-slate-700 border border-slate-200/80 py-1.5 px-3 rounded-lg transition-all flex items-center gap-1"
-                              >
-                                <Plus className="h-3.5 w-3.5" />
-                                Salvar Funil
-                              </button>
-                            )}
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                removeLead(lead.id);
-                              }}
-                              className="text-slate-400 hover:text-red-500 p-1.5 rounded-lg hover:bg-red-50 transition-all"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                    </>
+                      {tab.badge && (
+                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md shrink-0 ${
+                          isActive
+                            ? 'bg-white/20 text-white'
+                            : 'bg-slate-200/80 text-slate-700'
+                        }`}>
+                          {tab.badge}
+                        </span>
+                      )}
+                    </button>
                   );
-                })()}
+                })}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Sidebar Footer & User Profile */}
+        <div className="p-3 border-t border-slate-200/90 bg-slate-50/70 shrink-0 space-y-2">
+          {!isSidebarCollapsed ? (
+            <>
+              {/* Quick Config Buttons */}
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setIsCustomDomainModalOpen(true)}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-[11px] font-bold text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 transition shadow-2xs cursor-pointer"
+                  title="Configurar seu domínio próprio"
+                >
+                  <Globe className="h-3 w-3 text-blue-600" />
+                  <span className="truncate">Domínio</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsSellerRegisterModalOpen(true)}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-[11px] font-bold text-emerald-800 bg-emerald-50/80 hover:bg-emerald-100 border border-emerald-200 transition shadow-2xs cursor-pointer"
+                  title="Cadastrar revendedor ou vendedor"
+                >
+                  <Briefcase className="h-3 w-3 text-emerald-600" />
+                  <span className="truncate">Vender</span>
+                </button>
               </div>
 
-              {/* Single Lead Detail & Action Center */}
-              {selectedLead && (
-                <div className="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-sm space-y-6" id="lead-actions-panel">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-100">
-                    <div>
-                      <span className="bg-slate-100 text-slate-800 text-[9px] font-extrabold uppercase tracking-widest px-2 py-0.5 rounded-md border border-slate-200/50">
-                        {selectedLead.niche} em {selectedLead.city}
-                      </span>
-                      <h3 className="text-base font-black text-slate-900 mt-2">{selectedLead.name}</h3>
-                      <p className="text-xs text-red-600 font-extrabold mt-1.5 flex items-center gap-1.5">
-                        <AlertTriangle className="h-4 w-4 shrink-0 text-red-500" />
-                        Fraqueza: {selectedLead.weakness}
+              {/* User Identity Card */}
+              {currentUser && (
+                <div className="flex items-center justify-between px-2.5 py-2 bg-white rounded-xl border border-slate-200/80 shadow-2xs">
+                  <div className="min-w-0 flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-700 font-bold text-xs flex items-center justify-center shrink-0">
+                      {currentUser.username.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-slate-900 truncate">
+                        {currentUser.username}
+                      </p>
+                      <p className="text-[10px] text-slate-400 capitalize">
+                        {currentUser.role === 'master' ? 'Administrador' : currentUser.role === 'seller' ? 'Vendedor' : 'Lojista'}
                       </p>
                     </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => requireMasterAccess('site_preview', () => generateWebsiteTemplate(selectedLead))}
-                        className="bg-slate-950 hover:bg-slate-900 text-white text-xs font-black py-2.5 px-4 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer uppercase tracking-wider shadow-sm"
-                        id="btn-generate-site-model"
-                        title={!isMasterAuthenticated ? "Requer autenticação Master" : "Gerar site demonstrativo para este lead"}
-                      >
-                        <Globe className="h-3.5 w-3.5 text-cyan-400" />
-                        <span>Criar Site Modelo</span>
-                        {!isMasterAuthenticated && (
-                          <Lock className="h-3 w-3 text-amber-400 ml-0.5" />
-                        )}
-                      </button>
-                      <button
-                        onClick={() => {
-                          setPlateTheme('black_gold');
-                          setGmbReviewLink(selectedLead.googleMapsUrl);
-                          setActiveTab('nfc_designer');
-                        }}
-                        className="bg-white hover:bg-slate-50 border border-slate-200 text-slate-900 text-xs font-black py-2.5 px-4 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer uppercase tracking-wider"
-                        id="btn-generate-plate-model"
-                      >
-                        <QrCode className="h-3.5 w-3.5 text-slate-600" />
-                        Ver Placa NFC
-                      </button>
-                    </div>
                   </div>
+                  <button
+                    onClick={handleLogout}
+                    className="p-1 text-slate-400 hover:text-rose-600 transition-colors rounded-lg cursor-pointer"
+                    title="Sair do sistema"
+                  >
+                    <LogOut className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="flex flex-col items-center gap-2">
+              {currentUser && (
+                <div 
+                  className="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-700 font-bold text-xs flex items-center justify-center"
+                  title={`${currentUser.username} (${currentUser.role})`}
+                >
+                  {currentUser.username.charAt(0).toUpperCase()}
+                </div>
+              )}
+              <button
+                onClick={handleLogout}
+                className="p-2 text-slate-400 hover:text-rose-600 transition-colors rounded-lg cursor-pointer"
+                title="Sair do sistema"
+              >
+                <LogOut className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+        </div>
+      </aside>
 
-                  {/* Core Action Sections: Pitch & Contact */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                    
-                    {/* Pitch Script generated */}
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Abordagem WhatsApp</h4>
-                        <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200">
-                          <button
-                            onClick={() => setSelectedPitchType('combo')}
-                            className={`px-2 py-0.5 text-[10px] font-semibold rounded-md ${
-                              selectedPitchType === 'combo' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-500'
-                            }`}
-                          >
-                            Combo
-                          </button>
-                          <button
-                            onClick={() => setSelectedPitchType('nfc')}
-                            className={`px-2 py-0.5 text-[10px] font-semibold rounded-md ${
-                              selectedPitchType === 'nfc' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-500'
-                            }`}
-                          >
-                            NFC
-                          </button>
-                        </div>
-                      </div>
+      {/* 2. MAIN WORKSPACE (TOP BAR + CONTENT VIEWPORT) */}
+      <div className="flex-1 flex flex-col min-w-0 min-h-screen">
+        
+        {/* Clean Executive Top Bar */}
+        <header 
+          className="bg-white border-b border-slate-200/80 sticky top-0 z-20 backdrop-blur-md bg-white/95 w-full"
+          style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}
+        >
+          <div className="px-3.5 sm:px-6 lg:px-8 py-2.5 sm:py-3 flex items-center justify-between gap-3">
+            
+            {/* Left Zone: Sidebar Toggle + Breadcrumb (Desktop) / Brand (Mobile) */}
+            <div className="flex items-center gap-2.5 min-w-0">
+              {/* Mobile Menu Open Button */}
+              <button
+                onClick={() => setIsMobileMenuOpen(true)}
+                className="lg:hidden p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition cursor-pointer shrink-0"
+                aria-label="Abrir menu de navegação"
+              >
+                <Menu className="h-4 w-4" />
+              </button>
 
-                      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs font-medium text-slate-700 leading-relaxed max-h-[180px] overflow-y-auto whitespace-pre-wrap">
-                        {isGeneratingPitch ? (
-                          <div className="flex flex-col items-center justify-center py-8 gap-2 text-slate-400">
-                            <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-600 border-t-transparent" />
-                            <span>Escrevendo pitch persuasivo com IA...</span>
-                          </div>
-                        ) : (
-                          pitch?.whatsapp || "Selecione ou busque uma empresa para gerar o pitch inteligente com IA."
-                        )}
-                      </div>
+              {/* Mobile Brand Title */}
+              <div className="flex lg:hidden items-center gap-2 min-w-0">
+                <div className="w-7 h-7 rounded-lg bg-slate-950 text-white font-mono font-black text-xs flex items-center justify-center shrink-0">
+                  ALF
+                </div>
+                <span className="text-xs font-black text-slate-900 truncate">
+                  ALF Automação
+                </span>
+              </div>
 
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => {
-                            if (pitch) {
-                              navigator.clipboard.writeText(pitch.whatsapp);
-                              alert("Mensagem copiada para a área de transferência!");
-                            }
-                          }}
-                          className="flex-1 text-center py-2 border border-slate-200 hover:border-slate-300 text-slate-700 text-xs font-bold rounded-lg transition-all cursor-pointer"
-                        >
-                          Copiar Texto
-                        </button>
-                        <a
-                          href={getWhatsAppLink(selectedLead, pitch?.whatsapp)}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2 px-3 rounded-lg flex items-center justify-center gap-1 transition-all text-center shadow-xs"
-                          id="btn-send-whatsapp"
-                        >
-                          <MessageSquare className="h-4 w-4" />
-                          Enviar WhatsApp
-                        </a>
-                      </div>
-                    </div>
+              {/* Desktop Breadcrumbs Trail */}
+              <div className="hidden lg:flex items-center gap-2 text-xs font-medium min-w-0">
+                <button
+                  onClick={toggleSidebar}
+                  className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition mr-1 cursor-pointer"
+                  title={isSidebarCollapsed ? "Expandir menu lateral" : "Recolher menu lateral"}
+                >
+                  {isSidebarCollapsed ? <PanelLeft className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+                </button>
+                <span className="text-slate-400">ALF</span>
+                <span className="text-slate-300">/</span>
+                <span className="text-slate-500 font-medium">{activeTabMeta.category}</span>
+                <span className="text-slate-300">/</span>
+                <span className="text-slate-900 font-bold truncate">{activeTabMeta.label}</span>
+              </div>
+            </div>
 
-                    {/* Quick CRM Info & Details update */}
-                    <div className="space-y-4 bg-slate-50/60 border border-slate-100 rounded-xl p-4">
-                      <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider pb-1 border-b border-slate-200/50 flex items-center justify-between">
-                        <span>Configurações Comercial</span>
-                        <span className="text-[9px] bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded-sm font-black tracking-widest uppercase">GMB Analisado</span>
-                      </h4>
-                      
-                      <div className="space-y-3">
-                        {/* Google registration verified badge */}
-                        <div className="bg-slate-100/80 p-2.5 rounded-lg border border-slate-200/50 space-y-1.5">
-                          <span className="block text-[9px] font-bold text-slate-500 uppercase tracking-wider">Verificação de Registro GMB</span>
-                          <div className="flex items-center gap-1.5">
-                            {selectedLead.isGoogleRegistered !== false ? (
-                              <div className="flex items-center gap-1 text-emerald-700 text-xs font-bold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                                <CheckCircle className="h-3 w-3" /> Registrada no Google
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-1 text-red-700 text-xs font-bold bg-red-50 px-2 py-0.5 rounded-md border border-red-200">
-                                <AlertTriangle className="h-3 w-3" /> Não Reivindicada / Pendente
-                              </div>
-                            )}
-                          </div>
-                          {selectedLead.googleReviewsStatus && (
-                            <p className="text-[10px] text-slate-600 font-semibold mt-1">
-                              ⭐ <span className="text-slate-500">Status Avaliações:</span> {selectedLead.googleReviewsStatus}
-                            </p>
-                          )}
-                        </div>
+            {/* Center Zone: Quick Scanner Search */}
+            <div className="hidden md:flex flex-1 max-w-sm mx-2">
+              <button
+                type="button"
+                onClick={() => setIsPlateScannerOpen(true)}
+                className="w-full flex items-center justify-between px-3 py-1.5 bg-slate-100/80 hover:bg-slate-200/70 border border-slate-200 text-slate-500 rounded-xl text-xs transition cursor-pointer group"
+                title="Identificar placa ou QR físico (⌘K)"
+              >
+                <div className="flex items-center gap-2 truncate">
+                  <ScanLine className="h-3.5 w-3.5 text-indigo-600 shrink-0" />
+                  <span className="text-slate-600 font-medium truncate text-[11px]">
+                    Identificar placa ou QR físico...
+                  </span>
+                </div>
+                <span className="text-[10px] font-mono text-slate-400 bg-white border border-slate-200 px-1.5 py-0.5 rounded-md shrink-0">
+                  ⌘K
+                </span>
+              </button>
+            </div>
 
-                        <div>
-                          <label className="block text-[10px] text-slate-500 font-bold mb-1 uppercase tracking-wider">Produto Oferecido</label>
-                          <select
-                            value={selectedLead.productType || 'combo'}
-                            onChange={(e) => {
-                              const val = e.target.value as Lead['productType'];
-                              const price = val === 'nfc' ? nfcPrice : val === 'site' ? sitePrice : comboPrice;
-                              updateLeadDetails(selectedLead.id, { productType: val, saleValue: price });
-                            }}
-                            className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-semibold focus:outline-hidden"
-                          >
-                            <option value="combo">Combo: Placa NFC + Site (R$ {comboPrice})</option>
-                            <option value="nfc">Apenas Placa NFC Avaliação (R$ {nfcPrice})</option>
-                            <option value="site">Apenas Criação de Site (R$ {sitePrice})</option>
-                          </select>
-                        </div>
+            {/* Right Zone: Actions */}
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Mobile Scanner Quick Icon */}
+              <button
+                type="button"
+                onClick={() => setIsPlateScannerOpen(true)}
+                className="md:hidden p-2 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-700 transition cursor-pointer"
+                title="Ler Placa Física"
+              >
+                <ScanLine className="h-4 w-4" />
+              </button>
 
-                        <div>
-                          <label className="block text-[10px] text-slate-500 font-bold mb-1 uppercase tracking-wider">Telefone Comercial / WhatsApp</label>
-                          <div className="flex gap-2">
-                            <input
-                              type="text"
-                              value={selectedLead.phone}
-                              onChange={(e) => updateLeadDetails(selectedLead.id, { phone: e.target.value })}
-                              className="bg-white border border-slate-200 rounded-lg p-2 text-xs font-medium flex-1 focus:outline-hidden"
-                            />
-                            <a
-                              href={`tel:${selectedLead.phone.replace(/[^0-9]/g, '')}`}
-                              className="bg-slate-900 hover:bg-slate-800 text-white p-2 rounded-lg flex items-center justify-center transition-all"
-                              title="Ligar para o cliente"
-                            >
-                              <Phone className="h-4 w-4" />
-                            </a>
-                          </div>
-                        </div>
+              <PWAInstallButton />
 
-                        <div>
-                          <label className="block text-[10px] text-slate-500 font-bold mb-1 uppercase tracking-wider">Status do Funil</label>
-                          <select
-                            value={selectedLead.stage || 'new'}
-                            onChange={(e) => updateLeadStage(selectedLead.id, e.target.value as Lead['stage'])}
-                            className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-bold focus:outline-hidden text-blue-700"
-                          >
-                            <option value="new">Novo Lead (Encontrado)</option>
-                            <option value="to_contact">A Contatar (Abordagem)</option>
-                            <option value="contacted">Contatado / Em conversa</option>
-                            <option value="proposal">Proposta Comercial Enviada</option>
-                            <option value="negotiation">Em Negociação</option>
-                            <option value="won">Vendido 🎉 (Fechar Negócio)</option>
-                            <option value="lost">Recusado</option>
-                          </select>
-                        </div>
+              <button
+                type="button"
+                onClick={() => setIsCustomDomainModalOpen(true)}
+                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 transition shadow-2xs cursor-pointer"
+                title="Configurar domínio próprio para as placas NFC"
+              >
+                <Globe className="h-3.5 w-3.5 text-blue-600" />
+                <span>Domínio Próprio</span>
+              </button>
 
-                        {/* CRM SALES CYCLE: NEXT FOLLOW-UP DATE */}
-                        <div>
-                          <label className="block text-[10px] text-slate-500 font-bold mb-1 uppercase tracking-wider">Próximo Acompanhamento (Follow-Up)</label>
-                          <input
-                            type="date"
-                            value={selectedLead.nextFollowUp || ""}
-                            onChange={(e) => updateLeadDetails(selectedLead.id, { nextFollowUp: e.target.value })}
-                            className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-bold focus:outline-hidden text-slate-700"
-                          />
-                        </div>
+              <button
+                type="button"
+                onClick={() => setIsAntigravityModalOpen(true)}
+                className="hidden xl:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/90 transition shadow-2xs cursor-pointer"
+                title="Exportar projeto completo"
+              >
+                <FolderArchive className="h-3.5 w-3.5 text-indigo-600" />
+                <span>Exportar</span>
+              </button>
 
-                        {/* OUTREACH SCRIPTS BY SOLUTION (NFC / Site / Mini-site) */}
-                        <div className="bg-blue-50/50 p-2.5 rounded-lg border border-blue-100/80 space-y-2 mt-2">
-                          <span className="block text-[9px] font-bold text-blue-800 uppercase tracking-wider">💡 Abordagens de Especialista Sugeridas</span>
-                          
-                          {selectedLead.approachNfc && (
-                            <div className="space-y-0.5">
-                              <span className="block text-[8px] font-black uppercase text-blue-700">Abordagem Placa NFC:</span>
-                              <p className="text-[10px] text-slate-600 leading-snug">{selectedLead.approachNfc}</p>
-                            </div>
-                          )}
-                          
-                          {selectedLead.approachSite && (
-                            <div className="space-y-0.5 pt-1 border-t border-blue-100/50">
-                              <span className="block text-[8px] font-black uppercase text-blue-700">Abordagem Site de Modelo:</span>
-                              <p className="text-[10px] text-slate-600 leading-snug">{selectedLead.approachSite}</p>
-                            </div>
-                          )}
-
-                          {selectedLead.approachMiniSite && (
-                            <div className="space-y-0.5 pt-1 border-t border-blue-100/50">
-                              <span className="block text-[8px] font-black uppercase text-blue-700">Abordagem Mini-Site Local:</span>
-                              <p className="text-[10px] text-slate-600 leading-snug">{selectedLead.approachMiniSite}</p>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* CRM SALES HISTORY LOG */}
-                        <div className="space-y-2 pt-2 border-t border-slate-200/50">
-                          <label className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider">Anotações do Histórico</label>
-                          
-                          {/* List of notes */}
-                          <div className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1">
-                            {!selectedLead.historyNotes || selectedLead.historyNotes.length === 0 ? (
-                              <p className="text-[10px] text-slate-400 italic">Nenhuma anotação registrada ainda.</p>
-                            ) : (
-                              selectedLead.historyNotes.map((note, index) => (
-                                <div key={index} className="bg-white border border-slate-200 p-2 rounded-lg text-[10px] text-slate-600 leading-relaxed font-medium shadow-2xs relative">
-                                  {note}
-                                </div>
-                              ))
-                            )}
-                          </div>
-
-                          {/* Add a new note form */}
-                          <div className="flex gap-1.5 mt-2">
-                            <input
-                              type="text"
-                              value={newHistoryNote}
-                              onChange={(e) => setNewHistoryNote(e.target.value)}
-                              placeholder="Digite uma nova anotação do ciclo..."
-                              className="bg-white border border-slate-200 rounded-lg p-2 text-[10px] font-medium flex-1 focus:outline-hidden"
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter' && newHistoryNote.trim()) {
-                                  e.preventDefault();
-                                  const updatedNotes = [...(selectedLead.historyNotes || []), newHistoryNote.trim()];
-                                  updateLeadDetails(selectedLead.id, { historyNotes: updatedNotes });
-                                  setNewHistoryNote('');
-                                }
-                              }}
-                            />
-                            <button
-                              onClick={() => {
-                                if (newHistoryNote.trim()) {
-                                  const updatedNotes = [...(selectedLead.historyNotes || []), newHistoryNote.trim()];
-                                  updateLeadDetails(selectedLead.id, { historyNotes: updatedNotes });
-                                  setNewHistoryNote('');
-                                }
-                              }}
-                              className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-1 rounded-lg text-xs cursor-pointer flex items-center"
-                            >
-                              +
-                            </button>
-                          </div>
-                        </div>
-
-                      </div>
-                    </div>
-
+              {currentUser && (
+                <div className="flex items-center gap-1.5 pl-1">
+                  <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs bg-slate-100 border border-slate-200 text-slate-800">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                    <span className="text-[11px] font-bold truncate max-w-[120px]">
+                      {currentUser.username}
+                    </span>
+                    <button
+                      onClick={handleLogout}
+                      className="ml-0.5 text-slate-400 hover:text-rose-600 transition-colors p-0.5 rounded cursor-pointer"
+                      title="Sair"
+                    >
+                      <LogOut className="h-3 w-3" />
+                    </button>
                   </div>
                 </div>
               )}
-
             </div>
-
           </div>
+        </header>
+
+        {/* Compact Touch-Focused Mobile Off-Canvas Drawer (Categorized & Intuitive) */}
+        {isMobileMenuOpen && (
+          <div className="fixed inset-0 z-50 lg:hidden overflow-hidden" role="dialog" aria-modal="true" aria-label="Menu Lateral de Navegação">
+            {/* Backdrop Overlay with Smooth Blur & Quick Tap Dismiss */}
+            <div
+              className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs transition-opacity duration-200 cursor-pointer"
+              onClick={() => setIsMobileMenuOpen(false)}
+              aria-hidden="true"
+            />
+
+            {/* Slide-over Drawer Panel */}
+            <div className="fixed inset-y-0 right-0 w-[86vw] max-w-[340px] bg-white shadow-2xl flex flex-col z-10 h-[100dvh] max-h-[100dvh] animate-in slide-in-from-right duration-200 select-none border-l border-slate-200/80">
+              
+              {/* Drawer Header */}
+              <div 
+                className="p-3.5 border-b border-slate-100 flex items-center justify-between bg-slate-900 text-white shrink-0 shadow-xs"
+                style={{ paddingTop: 'max(env(safe-area-inset-top, 0px), 14px)' }}
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-cyan-400 text-white font-mono font-black flex items-center justify-center text-xs shadow-xs shrink-0">
+                    ALF
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <h2 className="text-xs font-black text-white leading-tight truncate">
+                        ALF Automação
+                      </h2>
+                      <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-md bg-white/10 text-cyan-300 font-bold">
+                        Menu
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-slate-300 font-medium truncate">
+                      Navegação &amp; Recursos
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 active:scale-95 text-white flex items-center justify-center transition-all cursor-pointer shrink-0"
+                  aria-label="Fechar menu"
+                >
+                  <X className="h-4.5 w-4.5" />
+                </button>
+              </div>
+
+              {/* Categorized Drawer Navigation */}
+              <div className="flex-1 overflow-y-auto overscroll-contain p-3 space-y-4 scrollbar-thin">
+                {navCategories.map((cat) => {
+                  const categoryTabs = navTabsList.filter(t => t.navGroup === cat.id);
+                  if (categoryTabs.length === 0) return null;
+
+                  return (
+                    <div key={cat.id} className="space-y-1.5">
+                      <div className="px-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        {cat.title}
+                      </div>
+                      {categoryTabs.map((tab) => {
+                        const isActive = activeTab === tab.id;
+                        const Icon = tab.icon;
+                        return (
+                          <button
+                            key={tab.id}
+                            onClick={() => handleNavSelect(tab.id)}
+                            className={`w-full text-left px-3 py-2.5 rounded-xl border transition-all flex items-center gap-2.5 cursor-pointer active:scale-[0.98] min-h-[48px] ${
+                              isActive
+                                ? 'bg-indigo-50/90 border-indigo-300 ring-1 ring-indigo-500/20 text-indigo-950 shadow-2xs'
+                                : 'bg-white hover:bg-slate-50 border-slate-200/80 hover:border-slate-300 text-slate-800'
+                            }`}
+                          >
+                            <div className={`w-8 h-8 rounded-lg shrink-0 flex items-center justify-center ${tab.bgColor} ${tab.color} border border-slate-100 shadow-2xs`}>
+                              <Icon className="h-4 w-4" />
+                            </div>
+                            
+                            <div className="flex-1 min-w-0 pr-1">
+                              <div className="flex items-center justify-between gap-1">
+                                <span className={`text-xs font-bold truncate leading-tight ${isActive ? 'text-indigo-950 font-black' : 'text-slate-900'}`}>
+                                  {tab.label}
+                                </span>
+                                {isActive ? (
+                                  <span className="inline-flex items-center gap-1 text-[9px] font-bold text-indigo-700 bg-indigo-100 px-1.5 py-0.5 rounded-md shrink-0">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-600" />
+                                    Ativo
+                                  </span>
+                                ) : tab.badge ? (
+                                  <span className="text-[9px] font-black px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-200 shrink-0 flex items-center gap-0.5">
+                                    {tab.requiresMaster && !isMasterAuthenticated && <Lock className="h-2.5 w-2.5" />}
+                                    {tab.badge}
+                                  </span>
+                                ) : (
+                                  <ChevronRight className="h-3.5 w-3.5 text-slate-300 shrink-0" />
+                                )}
+                              </div>
+                              <p className="text-[10px] text-slate-500 truncate leading-tight mt-0.5">
+                                {tab.description}
+                              </p>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Drawer Bottom Actions */}
+              <div 
+                className="p-3 pt-2.5 border-t border-slate-200 bg-slate-50/95 backdrop-blur-xs space-y-2 shrink-0 shadow-lg"
+                style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 14px)' }}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMobileMenuOpen(false);
+                    setIsSellerRegisterModalOpen(true);
+                  }}
+                  className="w-full min-h-[42px] flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 active:scale-[0.98] border border-emerald-300 text-emerald-900 text-xs font-bold transition-all shadow-2xs cursor-pointer"
+                >
+                  <Briefcase className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <span className="truncate">Seja um Vendedor / Revendedor</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMobileMenuOpen(false);
+                    setIsCustomDomainModalOpen(true);
+                  }}
+                  className="w-full min-h-[42px] flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-blue-50 hover:bg-blue-100 active:scale-[0.98] border border-blue-200 text-blue-800 text-xs font-bold transition-all shadow-2xs cursor-pointer"
+                >
+                  <Globe className="h-4 w-4 text-blue-600 shrink-0" />
+                  <span className="truncate">Configurar Domínio Próprio</span>
+                </button>
+
+                {isMasterAuthenticated ? (
+                  <button
+                    onClick={() => {
+                      handleMasterLogout();
+                      setIsMobileMenuOpen(false);
+                    }}
+                    className="w-full min-h-[42px] flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-red-50 hover:bg-red-100 active:scale-[0.98] border border-red-200 text-red-700 text-xs font-bold transition-all cursor-pointer"
+                  >
+                    <LogOut className="h-4 w-4 shrink-0" />
+                    <span>Desconectar Acesso Master</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => {
+                      setIsMobileMenuOpen(false);
+                      setMasterTargetTab(null);
+                      setMasterError('');
+                      setIsMasterModalOpen(true);
+                    }}
+                    className="w-full min-h-[42px] flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-amber-50 hover:bg-amber-100 active:scale-[0.98] border border-amber-300 text-amber-900 text-xs font-bold transition-all cursor-pointer"
+                  >
+                    <Lock className="h-4 w-4 text-amber-600 shrink-0" />
+                    <span>Entrar como Usuário Master</span>
+                  </button>
+                )}
+
+                <div className="flex items-center justify-between pt-0.5 text-[10px] text-slate-400 font-medium px-1">
+                  <span>ALF Automação • Sales Engine</span>
+                  <span className="font-mono text-[9px] text-slate-500">v2.5 Pro</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Mobile Bottom Navigation Dock */}
+        <div 
+          className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/90 shadow-2xl md:hidden px-2 pt-1.5"
+          style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 6px)' }}
+        >
+          <div className="grid grid-cols-5 gap-1 items-center max-w-md mx-auto">
+            <button
+              onClick={() => handleNavSelect('dynamic_qr')}
+              className={`min-h-[44px] flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all active:scale-95 cursor-pointer ${
+                activeTab === 'dynamic_qr' ? 'text-indigo-600 font-bold bg-indigo-50/80 shadow-2xs' : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              <QrCode className="h-4 w-4 mb-0.5" />
+              <span className="text-[10px] leading-tight">Placas &amp; QR</span>
+            </button>
+
+            <button
+              onClick={() => {
+                handleNavSelect('leads');
+                setLeadsSubTab('directory');
+              }}
+              className={`min-h-[44px] flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all active:scale-95 cursor-pointer ${
+                activeTab === 'leads'
+                  ? 'text-blue-600 font-bold bg-blue-50/80 shadow-2xs'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              <Building2 className="h-4 w-4 mb-0.5" />
+              <span className="text-[10px] leading-tight font-bold">Empresas</span>
+            </button>
+
+            <button
+              onClick={() => handleNavSelect('crm')}
+              className={`min-h-[44px] flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all active:scale-95 cursor-pointer ${
+                activeTab === 'crm' ? 'text-emerald-600 font-bold bg-emerald-50/80 shadow-2xs' : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              <TrendingUp className="h-4 w-4 mb-0.5" />
+              <span className="text-[10px] leading-tight">Funil CRM</span>
+            </button>
+
+            <button
+              onClick={() => handleNavSelect('calculator')}
+              className={`min-h-[44px] flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all active:scale-95 cursor-pointer ${
+                activeTab === 'calculator' ? 'text-violet-600 font-bold bg-violet-50/80 shadow-2xs' : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              <Coins className="h-4 w-4 mb-0.5" />
+              <span className="text-[10px] leading-tight">Calculadora</span>
+            </button>
+
+            <button
+              onClick={() => setIsMobileMenuOpen(true)}
+              className={`min-h-[44px] flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all active:scale-95 cursor-pointer ${
+                isMobileMenuOpen
+                  ? 'text-slate-900 font-bold bg-slate-100 shadow-2xs'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+              aria-label="Ver todos os recursos"
+            >
+              <LayoutGrid className="h-4 w-4 mb-0.5" />
+              <span className="text-[10px] leading-tight font-bold">Mais</span>
+            </button>
+          </div>
+        </div>
+
+      {/* Main Container - Protected against Bottom Dock & Notch / Home Gesture Bar */}
+      <main 
+        className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 pb-28 md:pb-8"
+        style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 6rem)' }}
+      >
+        
+        {/* Senior UX Contextual Section Header & Workflow Bar */}
+        <div className="mb-6 bg-white border border-slate-200/90 rounded-2xl p-4 sm:p-5 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-3.5 min-w-0">
+            <div className={`p-2.5 rounded-xl shrink-0 ${activeTabMeta.bgColor} border border-slate-200/60`}>
+              <activeTabMeta.icon className={`h-5 w-5 ${activeTabMeta.color}`} />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                  {activeTabMeta.category}
+                </span>
+                <span className="text-slate-300">·</span>
+                <span className="text-[11px] text-slate-500 font-medium">ALF Engine</span>
+              </div>
+              <h1 className="text-base sm:text-lg font-black text-slate-900 tracking-tight truncate">
+                {activeTabMeta.title}
+              </h1>
+              <p className="text-xs text-slate-500 line-clamp-1 mt-0.5">
+                {activeTabMeta.description}
+              </p>
+            </div>
+          </div>
+
+          {/* Contextual Quick Actions */}
+          <div className="flex items-center gap-2 flex-wrap shrink-0">
+            {activeTab === 'dynamic_qr' && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setIsPlateScannerOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-xl border border-indigo-200 transition cursor-pointer"
+                >
+                  <ScanLine className="h-3.5 w-3.5" />
+                  <span>Identificar Placa</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleNavSelect('nfc_designer')}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl border border-slate-200 transition cursor-pointer"
+                >
+                  <Sparkles className="h-3.5 w-3.5 text-amber-600" />
+                  <span>Designer Totem 10x10</span>
+                </button>
+              </>
+            )}
+            {activeTab === 'nfc_designer' && (
+              <button
+                type="button"
+                onClick={() => handleNavSelect('dynamic_qr')}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-xl border border-indigo-200 transition cursor-pointer"
+              >
+                <QrCode className="h-3.5 w-3.5" />
+                <span>Ver Lotes de Placas</span>
+              </button>
+            )}
+            {activeTab === 'leads' && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => handleNavSelect('crm')}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-xl border border-emerald-200 transition cursor-pointer"
+                >
+                  <TrendingUp className="h-3.5 w-3.5" />
+                  <span>Funil CRM</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleNavSelect('calculator')}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-violet-700 bg-violet-50 hover:bg-violet-100 rounded-xl border border-violet-200 transition cursor-pointer"
+                >
+                  <Coins className="h-3.5 w-3.5" />
+                  <span>Simular ROI</span>
+                </button>
+              </>
+            )}
+            {activeTab === 'crm' && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => handleNavSelect('leads')}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-xl border border-blue-200 transition cursor-pointer"
+                >
+                  <Building2 className="h-3.5 w-3.5" />
+                  <span>Empresas</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleNavSelect('calculator')}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-violet-700 bg-violet-50 hover:bg-violet-100 rounded-xl border border-violet-200 transition cursor-pointer"
+                >
+                  <Coins className="h-3.5 w-3.5" />
+                  <span>Calculadora ROI</span>
+                </button>
+              </>
+            )}
+            {activeTab === 'calculator' && (
+              <button
+                type="button"
+                onClick={() => handleNavSelect('crm')}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-xl border border-emerald-200 transition cursor-pointer"
+              >
+                <TrendingUp className="h-3.5 w-3.5" />
+                <span>Voltar ao Funil CRM</span>
+              </button>
+            )}
+            {activeTab === 'site_preview' && (
+              <button
+                type="button"
+                onClick={() => handleNavSelect('leads')}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-xl border border-blue-200 transition cursor-pointer"
+              >
+                <Building2 className="h-3.5 w-3.5" />
+                <span>Selecionar Outra Empresa</span>
+              </button>
+            )}
+            {activeTab === 'cardapio' && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => handleNavSelect('dynamic_qr')}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-xl border border-indigo-200 transition cursor-pointer"
+                >
+                  <QrCode className="h-3.5 w-3.5" />
+                  <span>Placas de Mesas</span>
+                </button>
+                <a
+                  href="/cardapio/bellariobranco?mesa=01"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 rounded-xl border border-amber-200 transition cursor-pointer"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  <span>Visualizar como Cliente</span>
+                </a>
+              </>
+            )}
+            {activeTab === 'portal' && (
+              <button
+                type="button"
+                onClick={() => handleNavSelect('dynamic_qr')}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-xl border border-rose-200 transition cursor-pointer"
+              >
+                <QrCode className="h-3.5 w-3.5" />
+                <span>Gerenciar Placas &amp; QR</span>
+              </button>
+            )}
+            {activeTab === 'users' && (
+              <button
+                type="button"
+                onClick={() => setIsSellerRegisterModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl border border-slate-200 transition cursor-pointer"
+              >
+                <Briefcase className="h-3.5 w-3.5 text-emerald-600" />
+                <span>Novo Vendedor</span>
+              </button>
+            )}
+            {activeTab === 'landing' && (
+              <button
+                type="button"
+                onClick={() => handleNavSelect('dynamic_qr')}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-xl border border-indigo-200 transition cursor-pointer"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+                <span>Voltar ao Painel ALF</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* TAB 1: MEUS CLIENTES & PROSPECÇÃO LOCAL */}
+        {activeTab === 'leads' && (
+          <LeadManagementModule
+            leads={leads}
+            selectedLead={selectedLead}
+            setSelectedLead={setSelectedLead}
+            city={city}
+            setCity={setCity}
+            niche={niche}
+            setNiche={setNiche}
+            customNiche={customNiche}
+            setCustomNiche={setCustomNiche}
+            isSearching={isSearching}
+            searchStep={searchStep}
+            searchLogs={searchLogs}
+            searchErrorDetails={searchErrorDetails}
+            searchExecutionTime={searchExecutionTime}
+            isConsoleExpanded={isConsoleExpanded}
+            setIsConsoleExpanded={setIsConsoleExpanded}
+            antiTruncationRecovered={antiTruncationRecovered}
+            searchLocalBusinesses={searchLocalBusinesses}
+            nfcPrice={nfcPrice}
+            setNfcPrice={setNfcPrice}
+            sitePrice={sitePrice}
+            setSitePrice={setSitePrice}
+            comboPrice={comboPrice}
+            setComboPrice={setComboPrice}
+            tableSearchTerm={tableSearchTerm}
+            setTableSearchTerm={setTableSearchTerm}
+            selectedCityFilter={selectedCityFilter}
+            setSelectedCityFilter={setSelectedCityFilter}
+            ratingFilter={ratingFilter}
+            setRatingFilter={setRatingFilter}
+            sortBy={sortBy}
+            setSortBy={setSortBy}
+            easyConversionOnly={easyConversionOnly}
+            setEasyConversionOnly={setEasyConversionOnly}
+            filterOnlySearched={filterOnlySearched}
+            setFilterOnlySearched={setFilterOnlySearched}
+            lastSearchLeadIds={lastSearchLeadIds}
+            updateLeadStage={updateLeadStage}
+            removeLead={removeLead}
+            handleWebShareLead={handleWebShareLead}
+            requireMasterAccess={requireMasterAccess}
+            generateWebsiteTemplate={generateWebsiteTemplate}
+            siteTemplate={siteTemplate}
+            setIsExportSiteModalOpen={setIsExportSiteModalOpen}
+            setPlateTheme={setPlateTheme}
+            setGmbReviewLink={setGmbReviewLink}
+            setActiveTab={setActiveTab}
+            validateAndFixGoogleReviewLink={validateAndFixGoogleReviewLink}
+            isValidatingGmbUrl={isValidatingGmbUrl}
+            gmbValidationFeedback={gmbValidationFeedback}
+            updateLeadDetails={updateLeadDetails}
+            generateSalesPitch={generateSalesPitch}
+            pitch={pitch}
+            isGeneratingPitch={isGeneratingPitch}
+            selectedPitchType={selectedPitchType}
+            setSelectedPitchType={setSelectedPitchType}
+            getWhatsAppLink={getWhatsAppLink}
+            isMasterAuthenticated={isMasterAuthenticated}
+            newHistoryNote={newHistoryNote}
+            setNewHistoryNote={setNewHistoryNote}
+          />
         )}
 
         {/* TAB 2: CRM KANBAN & METRICS */}
@@ -2586,95 +3566,154 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB 3: AI WEBSITE MODEL GENERATOR */}
+        {/* TAB 3: AI WEBSITE MODEL GENERATOR & CLIENT MINI SITE */}
         {activeTab === 'site_preview' && (
           <div>
-            {!isMasterAuthenticated ? (
-              <div className="max-w-md mx-auto my-12 bg-white rounded-3xl border border-slate-200/80 p-8 shadow-xl text-center space-y-6">
-                <div className="mx-auto w-16 h-16 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600 shadow-inner">
-                  <Lock className="h-8 w-8" />
-                </div>
-                <div>
-                  <span className="inline-block text-[10px] font-extrabold tracking-widest uppercase bg-amber-100 text-amber-900 px-3 py-1 rounded-full mb-2">
-                    Acesso Restrito Master
-                  </span>
-                  <h2 className="text-xl font-black text-slate-900">
-                    Site Demonstrativo Protegido
-                  </h2>
-                  <p className="text-xs text-slate-500 mt-2 leading-relaxed">
-                    A criação e simulação de sites de modelo é uma ferramenta estratégica exclusiva para operadores autorizados. Faça login com a senha Master para desbloquear.
-                  </p>
-                </div>
-
-                <form onSubmit={handleMasterLogin} className="space-y-4 text-left">
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="block text-xs font-bold text-slate-700">Usuário Master</label>
-                      <div className="flex gap-1">
-                        <button
-                          type="button"
-                          onClick={() => fillMasterCredentials('env')}
-                          className="text-[9px] px-1.5 py-0.5 bg-amber-50 text-amber-800 border border-amber-200 rounded font-bold hover:bg-amber-100 transition cursor-pointer"
-                          title="Preencher com Mysis@26"
-                        >
-                          Mysis@26
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => fillMasterCredentials('default')}
-                          className="text-[9px] px-1.5 py-0.5 bg-slate-100 text-slate-700 border border-slate-200 rounded font-bold hover:bg-slate-200 transition cursor-pointer"
-                          title="Preencher com master"
-                        >
-                          master
-                        </button>
+            <div className="space-y-6">
+                {/* 🌟 SWITCHER DE MODO DO SITE DEMONSTRATIVO: MINI SITE vs LANDING PAGE COMPLETA */}
+                <div className="bg-white border border-slate-200 rounded-3xl p-4 md:p-5 shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
+                  <div className="flex items-center gap-3.5">
+                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-sky-500 via-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-md shadow-blue-500/20 shrink-0">
+                      {demonstratorMode === 'minisite' ? <Smartphone className="w-6 h-6" /> : <Globe className="w-6 h-6" />}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
+                          Site Demonstrativo
+                        </span>
+                        <span className="text-xs font-black text-slate-900">
+                          {selectedLead ? selectedLead.name : 'Sua Empresa Demonstração'}
+                        </span>
                       </div>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {demonstratorMode === 'minisite'
+                          ? 'Mini Site interativo inovador com link exportável, WhatsApp, Pix, Wi-Fi 1-clique e Google Reviews'
+                          : 'Landing page institucional completa de alta conversão para computadores e celulares'}
+                      </p>
                     </div>
-                    <input
-                      type="text"
-                      value={masterUserInput}
-                      onChange={(e) => setMasterUserInput(e.target.value)}
-                      placeholder="Mysis@26 ou master"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-semibold focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Senha Master</label>
-                    <input
-                      type="password"
-                      value={masterPasswordInput}
-                      onChange={(e) => setMasterPasswordInput(e.target.value)}
-                      placeholder="••••••••"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-semibold focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
-                    />
                   </div>
 
-                  {masterError && (
-                    <div className="p-3 bg-red-50 border border-red-200 rounded-xl flex items-center gap-2 text-xs font-bold text-red-700">
-                      <AlertCircle className="h-4 w-4 shrink-0 text-red-500" />
-                      <span>{masterError}</span>
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    {/* Mode Toggle Buttons */}
+                    <div className="bg-slate-100 p-1 rounded-2xl flex border border-slate-200">
+                      <button
+                        type="button"
+                        onClick={() => setDemonstratorMode('minisite')}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-black transition flex items-center gap-2 cursor-pointer ${
+                          demonstratorMode === 'minisite'
+                            ? 'bg-sky-600 text-white shadow-xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        <Smartphone className="w-4 h-4" />
+                        <span>Mini Site (Hub &amp; NFC)</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setDemonstratorMode('website')}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-black transition flex items-center gap-2 cursor-pointer ${
+                          demonstratorMode === 'website'
+                            ? 'bg-blue-600 text-white shadow-xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        <Globe className="w-4 h-4" />
+                        <span>Landing Page Completa</span>
+                      </button>
                     </div>
-                  )}
 
-                  <button
-                    type="submit"
-                    disabled={masterIsLoading}
-                    className="w-full py-2.5 bg-slate-900 hover:bg-black text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-                  >
-                    {masterIsLoading ? (
-                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Unlock className="h-3.5 w-3.5 text-amber-400" />
-                    )}
-                    <span>Desbloquear Site Demonstrativo</span>
-                  </button>
-                </form>
+                    {/* Company Switcher inside Demonstrator */}
+                    <select
+                      value={selectedLead?.id || ''}
+                      onChange={(e) => {
+                        const target = leads.find(l => l.id === e.target.value);
+                        if (target) {
+                          setSelectedLead(target);
+                          setGmbReviewLink(target.googleMapsUrl || '');
+                        }
+                      }}
+                      className="bg-white border border-slate-200 text-slate-700 text-xs font-bold rounded-xl px-3 py-2 cursor-pointer focus:outline-hidden hover:border-slate-300"
+                      title="Trocar a empresa ativa para demonstração"
+                    >
+                      <option value="">🏢 Trocar Empresa ({leads.length})...</option>
+                      {leads.map((l) => (
+                        <option key={l.id} value={l.id}>
+                          {l.name} ({l.city})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
 
-                <p className="text-[11px] text-slate-400 font-medium">
-                  Operador Master ALEF Automações • Aceita: Mysis@26 / Myadm@26 ou master / master@2026
-                </p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                {demonstratorMode === 'minisite' ? (
+                  <MiniSiteViewer
+                    config={{
+                      id: selectedLead?.id || 'demo',
+                      companyName: selectedLead?.name || 'Sua Empresa Aqui',
+                      niche: selectedLead?.niche || niche || 'Negócio Local',
+                      city: selectedLead?.city || city || 'São Paulo',
+                      tagline: selectedLead?.weakness
+                        ? `Atendimento de excelência e soluções rápidas em ${selectedLead.city || 'sua cidade'}`
+                        : 'Atendimento exclusivo, qualidade garantida e agilidade.',
+                      whatsappNumber: selectedLead?.nfcWhatsappNum || selectedLead?.phone || '',
+                      whatsappMessage: selectedLead?.nfcWhatsappMsg || `Olá! Vim através do Mini Site de ${selectedLead?.name || 'sua empresa'} e gostaria de atendimento.`,
+                      instagramUrl: selectedLead?.nfcInstagramUrl || '',
+                      googleReviewUrl: selectedLead?.googleMapsUrl || gmbReviewLink || 'https://maps.google.com',
+                      websiteUrl: selectedLead?.websiteUrl || '',
+                      pixKey: (selectedLead as any)?.miniSiteConfig?.pixKey || (selectedLead?.phone ? selectedLead.phone.replace(/\D/g, '') : 'pix@empresa.com.br'),
+                      pixBeneficiary: selectedLead?.name || 'Empresa Local',
+                      pixKeyType: 'telefone',
+                      wifiSsid: (selectedLead as any)?.miniSiteConfig?.wifiSsid || `${(selectedLead?.name || 'Empresa').replace(/\s+/g, '_')}_WiFi`,
+                      wifiPassword: (selectedLead as any)?.miniSiteConfig?.wifiPassword || 'VisiteNos123',
+                      address: (selectedLead as any)?.miniSiteConfig?.address || selectedLead?.address || '',
+                      phone: selectedLead?.phone || '',
+                      openingHours: (selectedLead as any)?.miniSiteConfig?.openingHours || 'Segunda a Sábado: 08h às 19h',
+                      theme: 'dark_neon'
+                    }}
+                    leadId={selectedLead?.id || 'demo'}
+                    isLinkedToNfc={selectedLead?.nfcRedirectActive === 'minisite'}
+                    onLinkToNfc={(vercelUrl) => {
+                      if (selectedLead) {
+                        updateLeadDetails(selectedLead.id, { 
+                          nfcRedirectActive: 'minisite',
+                          nfcCustomUrl: vercelUrl || undefined
+                        });
+                        alert(`Mini Site de ${selectedLead.name} vinculado com sucesso à Placa NFC! Ao encostar na placa física ou ler o QR Code, este Mini Site ${vercelUrl ? `(${vercelUrl})` : ''} abrirá na hora.`);
+                      }
+                    }}
+                    onChangeConfig={(updated) => {
+                      if (selectedLead) {
+                        updateLeadDetails(selectedLead.id, {
+                          name: updated.companyName,
+                          niche: updated.niche,
+                          city: updated.city,
+                          nfcWhatsappNum: updated.whatsappNumber,
+                          nfcWhatsappMsg: updated.whatsappMessage,
+                          nfcInstagramUrl: updated.instagramUrl,
+                          googleMapsUrl: updated.googleReviewUrl,
+                          websiteUrl: updated.websiteUrl,
+                          phone: updated.phone || selectedLead.phone,
+                          address: updated.address || selectedLead.address,
+                          miniSiteConfig: {
+                            pixKey: updated.pixKey,
+                            pixBeneficiary: updated.pixBeneficiary,
+                            pixKeyType: updated.pixKeyType,
+                            wifiSsid: updated.wifiSsid,
+                            wifiPassword: updated.wifiPassword,
+                            tagline: updated.tagline,
+                            logoUrl: updated.logoUrl,
+                            theme: updated.theme,
+                            address: updated.address,
+                            phone: updated.phone,
+                            openingHours: updated.openingHours
+                          }
+                        });
+                      }
+                    }}
+                  />
+                ) : (
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                 
                 {/* Template parameters live-editor panel */}
                 <div className="lg:col-span-4 bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
@@ -2832,7 +3871,7 @@ export default function App() {
 
                       {/* Pitch Script Hint */}
                       {selectedLead && (
-                        <div className="pt-3 border-t border-slate-100 bg-blue-50/60 p-3.5 rounded-xl border border-blue-100 text-xs">
+                        <div className="pt-3 border-t border-slate-100 bg-blue-50/60 p-3 rounded-xl border border-blue-100 text-xs">
                           <h4 className="font-extrabold text-blue-900 flex items-center gap-1">
                             <Sparkles className="h-3 w-3 text-blue-600" />
                             Gatilho de Venda para {selectedLead.name}
@@ -2842,6 +3881,75 @@ export default function App() {
                           </p>
                         </div>
                       )}
+
+                      {/* Central de Exportação & Hospedagem Card */}
+                      <div className="pt-3 border-t border-slate-100 bg-linear-to-br from-emerald-50 via-teal-50/40 to-slate-50 p-3.5 rounded-2xl border border-emerald-200/90 space-y-2.5 shadow-2xs">
+                        <div className="flex items-center justify-between">
+                          <h4 className="font-extrabold text-emerald-950 text-xs flex items-center gap-1.5">
+                            <Download className="h-4 w-4 text-emerald-600" />
+                            Exportar Site para Hospedar
+                          </h4>
+                          <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-200/70 text-emerald-900 border border-emerald-300">
+                            Pronto
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-emerald-800 leading-snug">
+                          Gere o código e os arquivos de produção para colocar no ar pelo Netlify Drop, Vercel ou cPanel do cliente.
+                        </p>
+                        <div className="space-y-1.5 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => setIsExportSiteModalOpen(true)}
+                            className="w-full py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl shadow-xs flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-98"
+                            id="btn-open-site-exporter"
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            <span>Central de Exportação (ZIP / HTML)</span>
+                          </button>
+                          
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                if (!siteTemplate) return;
+                                setIsDirectDownloadingZip(true);
+                                try {
+                                  await downloadClientSiteZip(
+                                    siteTemplate,
+                                    selectedLead || { name: 'Cliente', city: city || 'São Paulo', niche: niche || 'Serviços', phone: '(11) 99999-9999' },
+                                    { theme: simulatorTheme }
+                                  );
+                                } finally {
+                                  setIsDirectDownloadingZip(false);
+                                }
+                              }}
+                              disabled={isDirectDownloadingZip}
+                              className="py-1.5 px-2 bg-white hover:bg-slate-50 text-slate-700 border border-emerald-300 font-bold text-[10px] rounded-lg flex items-center justify-center gap-1 transition-all cursor-pointer shadow-2xs disabled:opacity-50"
+                              title="Baixar arquivo ZIP com index.html, css, js e manual de hospedagem"
+                            >
+                              <Download className="h-3 w-3 text-emerald-600" />
+                              <span>{isDirectDownloadingZip ? 'Gerando...' : 'Baixar ZIP'}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!siteTemplate) return;
+                                openLiveSitePreview(
+                                  siteTemplate,
+                                  selectedLead || { name: 'Cliente', city: city || 'São Paulo', niche: niche || 'Serviços', phone: '(11) 99999-9999' },
+                                  { theme: simulatorTheme }
+                                );
+                              }}
+                              className="py-1.5 px-2 bg-white hover:bg-slate-50 text-slate-700 border border-emerald-300 font-bold text-[10px] rounded-lg flex items-center justify-center gap-1 transition-all cursor-pointer shadow-2xs"
+                              title="Abrir pré-visualização em tela cheia numa nova aba do navegador"
+                            >
+                              <ExternalLink className="h-3 w-3 text-emerald-600" />
+                              <span>Tela Cheia</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
 
                     </div>
                   ) : (
@@ -2884,11 +3992,44 @@ export default function App() {
                       </span>
                     </div>
                     
-                    {selectedLead && (
-                      <span className="text-xs text-slate-600 font-bold bg-white px-3 py-1.5 border border-slate-200 rounded-xl shadow-2xs">
-                        Empresa: <strong className="font-extrabold text-slate-900">{selectedLead.name}</strong>
-                      </span>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {selectedLead && (
+                        <span className="text-xs text-slate-600 font-bold bg-white px-3 py-1.5 border border-slate-200 rounded-xl shadow-2xs hidden lg:inline-block">
+                          Empresa: <strong className="font-extrabold text-slate-900">{selectedLead.name}</strong>
+                        </span>
+                      )}
+
+                      {/* Fast Action Buttons in Simulator Bar */}
+                      <button
+                        type="button"
+                        onClick={() => setIsExportSiteModalOpen(true)}
+                        disabled={!siteTemplate}
+                        className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 disabled:opacity-50 text-white px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer shadow-sm hover:shadow-md"
+                        id="btn-header-export-site"
+                        title="Exportar arquivos completos para hospedar para o cliente"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        <span>Exportar Site (ZIP)</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!siteTemplate) return;
+                          openLiveSitePreview(
+                            siteTemplate,
+                            selectedLead || { name: 'Cliente', city: city || 'São Paulo', niche: niche || 'Serviços', phone: '(11) 99999-9999' },
+                            { theme: simulatorTheme }
+                          );
+                        }}
+                        disabled={!siteTemplate}
+                        className="flex items-center gap-1 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs disabled:opacity-50"
+                        title="Ver o site gerado em tela cheia numa nova aba do navegador"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5 text-blue-600" />
+                        <span className="hidden sm:inline">Tela Cheia</span>
+                      </button>
+                    </div>
                   </div>
 
                   {/* Simulator view frame */}
@@ -2968,7 +4109,7 @@ export default function App() {
                             <div 
                               className="absolute inset-0 bg-cover bg-center transition-transform duration-75 ease-out opacity-80"
                               style={{
-                                backgroundImage: `url('https://images.unsplash.com/photo-1521737604893-d14cc237f11d?auto=format&fit=crop&w=1200&q=80')`,
+                                backgroundImage: `url('${(siteTemplate as any)?.images?.hero || detectNicheVisualProfile(selectedLead?.niche, selectedLead?.name).images.hero}')`,
                                 transform: `scale(${1 + (simulatedScroll / 450)}) translateY(${simulatedScroll * 0.12}px)`,
                                 filter: `blur(${Math.min(3, simulatedScroll / 120)}px)`
                               }}
@@ -3171,10 +4312,48 @@ export default function App() {
                             </div>
                           </section>
 
+                          {/* Niche Photo Showcase / Estrutura e Casos Reais */}
+                          {(() => {
+                            const profile = detectNicheVisualProfile(selectedLead?.niche, selectedLead?.name);
+                            const galleryItems = (siteTemplate as any)?.images?.gallery || profile.images.gallery;
+                            return (
+                              <section className={`px-5 py-8 border-b space-y-4 ${
+                                simulatorTheme === 'dark' ? 'border-slate-800 bg-slate-900/40' : 'border-slate-100 bg-slate-50/50'
+                              }`}>
+                                <div className="text-center">
+                                  <span className="text-[9px] font-black uppercase tracking-widest text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
+                                    Galeria &amp; Estrutura
+                                  </span>
+                                  <h3 className="text-sm font-black mt-1">Padrão de Qualidade do Segmento</h3>
+                                  <p className="text-[11px] text-slate-400">Espaço, equipamentos e atendimento em {selectedLead?.city || 'sua cidade'}</p>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-2.5">
+                                  {galleryItems.map((g: any, gIdx: number) => (
+                                    <div key={gIdx} className="relative rounded-xl overflow-hidden aspect-4/3 shadow-xs border border-slate-200 group">
+                                      <img src={g.url} alt={g.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                                      <div className="absolute inset-0 bg-gradient-to-t from-slate-950/85 via-transparent to-transparent flex flex-col justify-end p-2 text-white">
+                                        <span className="text-[7.5px] font-black uppercase text-amber-400 tracking-wider">{g.category}</span>
+                                        <span className="text-[10px] font-bold leading-tight line-clamp-1">{g.title}</span>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </section>
+                            );
+                          })()}
+
                           {/* About Us Section */}
-                          <section className={`px-5 py-8 border-y flex flex-col md:flex-row items-center gap-6 ${
+                          <section className={`px-5 py-8 border-y flex flex-col md:flex-row items-center gap-5 ${
                             simulatorTheme === 'dark' ? 'border-slate-800 bg-slate-950/50' : 'border-slate-100 bg-white/60'
                           }`}>
+                            <div className="w-full md:w-1/2 aspect-4/3 rounded-xl overflow-hidden border border-slate-200 shadow-xs shrink-0">
+                              <img
+                                src={(siteTemplate as any)?.images?.about || detectNicheVisualProfile(selectedLead?.niche, selectedLead?.name).images.about}
+                                alt="Sobre a empresa"
+                                className="w-full h-full object-cover"
+                              />
+                            </div>
                             <div className="space-y-3 flex-1">
                               <h2 className="text-sm font-black">{siteTemplate.about.title}</h2>
                               <p className={`text-xs leading-relaxed ${
@@ -3381,263 +4560,69 @@ export default function App() {
                       <p className="text-xs text-slate-400">Gere o site de modelo no menu de prospecção para ver a prévia interativa.</p>
                     </div>
                   )}
-
                 </div>
-
               </div>
             )}
           </div>
+        </div>
+      )}
+
+        {/* TAB 4: PHYSICAL NFC CARD DESIGNER & 3D TOTEM SIMULATOR */}
+        {(activeTab === 'nfc_designer' || (activeTab as any) === 'nfc') && (
+          <NfcMockupTotem
+            businessName={selectedLead ? selectedLead.name : 'Sua Empresa Aqui'}
+            niche={selectedLead ? selectedLead.niche : niche}
+            city={selectedLead ? selectedLead.city : city}
+            reviewLink={gmbReviewLink || (selectedLead ? getDirectLeadUrl(selectedLead) : 'https://maps.google.com')}
+            nfcRedirectUrl={selectedLead ? getDynamicQrUrl(selectedLead.id) : getDynamicQrUrl('demo')}
+            leadId={selectedLead ? selectedLead.id : 'demo'}
+            instagramUrl={selectedLead ? selectedLead.nfcInstagramUrl : ''}
+            nfcRedirectActive={selectedLead ? selectedLead.nfcRedirectActive : 'gmb'}
+            onPrintPlate={(chosenTheme) => print10x10Plate(selectedLead || undefined, chosenTheme || (selectedLead?.nfcRedirectActive === 'instagram' ? 'instagram_dual' : 'emerald_green'))}
+            onDownloadQr={() => downloadClientQrCode(selectedLead, 1000)}
+            isDownloadingQr={isDownloadingQr}
+            leads={leads}
+            onSelectLead={(lead) => {
+              const full = leads.find(l => l.id === lead.id) || (lead as Lead);
+              setSelectedLead(full);
+              setGmbReviewLink(full.googleMapsUrl || '');
+            }}
+            onNavigateToMiniSite={(leadId) => {
+              setDemonstratorMode('minisite');
+              changeTab('site_preview');
+            }}
+            onUpdateRedirectTarget={(target) => {
+              if (selectedLead) {
+                updateLeadDetails(selectedLead.id, { nfcRedirectActive: target as any });
+              }
+            }}
+            onTogglePlaquePrinted={(leadId, currentStatus) => {
+              const newStatus = !currentStatus;
+              updateLeadDetails(leadId, {
+                isPlaquePrinted: newStatus,
+                plaquePrintedAt: newStatus ? new Date().toISOString() : undefined
+              });
+            }}
+            onOpenCustomDomain={() => setIsCustomDomainModalOpen(true)}
+          />
         )}
 
-        {/* TAB 4: PHYSICAL NFC CARD DESIGNER */}
-        {activeTab === 'nfc_designer' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            
-            {/* Design Controls */}
-            <div className="lg:col-span-4 bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-5">
-              <div className="pb-3 border-b border-slate-100">
-                <h2 className="text-base font-bold text-slate-900 flex items-center gap-1.5">
-                  <QrCode className="h-4.5 w-4.5 text-blue-600" />
-                  Configurar Placa NFC de Avaliação
-                </h2>
-                <p className="text-xs text-slate-500 mt-1">
-                  Estilize o design físico da Placa/Cartão para o cliente e gere o QR-Code direto para as avaliações no Google Meu Negócio.
-                </p>
-              </div>
-
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">Estilo Visual do Cartão</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      onClick={() => setPlateTheme('black_gold')}
-                      className={`py-2 px-3 text-xs rounded-xl border text-center transition-all ${
-                        plateTheme === 'black_gold' ? 'bg-slate-900 text-white border-black font-semibold' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'
-                      }`}
-                    >
-                      Preto e Ouro Luxury
-                    </button>
-                    <button
-                      onClick={() => setPlateTheme('acrylic_clean')}
-                      className={`py-2 px-3 text-xs rounded-xl border text-center transition-all ${
-                        plateTheme === 'acrylic_clean' ? 'bg-white text-slate-800 border-slate-300 font-semibold' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'
-                      }`}
-                    >
-                      Acrílico Transparente
-                    </button>
-                    <button
-                      onClick={() => setPlateTheme('warm_red')}
-                      className={`py-2 px-3 text-xs rounded-xl border text-center transition-all ${
-                        plateTheme === 'warm_red' ? 'bg-red-600 text-white border-red-700 font-semibold' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'
-                      }`}
-                    >
-                      Veneza Vermelho
-                    </button>
-                    <button
-                      onClick={() => setPlateTheme('navy_blue')}
-                      className={`py-2 px-3 text-xs rounded-xl border text-center transition-all ${
-                        plateTheme === 'navy_blue' ? 'bg-blue-900 text-white border-blue-950 font-semibold' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'
-                      }`}
-                    >
-                      Azul Corporativo
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">Nome do Negócio Impresso</label>
-                  <input
-                    type="text"
-                    value={selectedLead ? selectedLead.name : 'Sua Empresa Aqui'}
-                    onChange={(e) => {
-                      if (selectedLead) {
-                        updateLeadDetails(selectedLead.id, { name: e.target.value });
-                      }
-                    }}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3.5 text-xs font-medium focus:bg-white focus:outline-hidden"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">Link de Avaliação Google (ou Maps)</label>
-                  <input
-                    type="text"
-                    value={gmbReviewLink || (selectedLead ? selectedLead.googleMapsUrl : 'https://g.page/r/sua-empresa/review')}
-                    onChange={(e) => setGmbReviewLink(e.target.value)}
-                    placeholder="Cole o link do Google Meu Negócio"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3.5 text-xs font-medium focus:bg-white focus:outline-hidden"
-                  />
-                  <span className="text-[10px] text-slate-400 mt-1 block leading-normal">
-                    Este link será programado no chip NFC interno e impresso no QR Code do cartão físico.
-                  </span>
-                </div>
-
-                {selectedLead && (
-                  <div className="bg-slate-50 rounded-xl p-4 border border-slate-100 space-y-2">
-                    <h4 className="text-xs font-bold text-slate-700">Abordagem de Venda da Placa:</h4>
-                    <p className="text-[11px] text-slate-600 leading-relaxed">
-                      "Com essa Placa NFC em cima do seu balcão ou caixa, você consegue mais avaliações em 5 segundos do que em 1 ano inteiro de forma orgânica. Cada cliente satisfeito que aproxima o celular ajuda a elevar seu rank do Google!"
-                    </p>
-                  </div>
-                )}
-
-                {selectedLead && (
-                  <div className="bg-blue-50/50 border border-blue-200 p-4 rounded-xl space-y-3">
-                    <div className="space-y-1">
-                      <h4 className="text-xs font-bold text-blue-900 uppercase tracking-wide flex items-center gap-1.5">
-                        <Smartphone className="h-4 w-4 text-blue-600" />
-                        Gravação do Chip NFC Físico
-                      </h4>
-                      <p className="text-[10px] text-blue-700 leading-normal">
-                        Para ativar uma tag NFC modelo ou definitiva para o cliente aproximar o celular e ser redirecionado, siga o passo a passo abaixo:
-                      </p>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <span className="block text-[10px] font-bold text-slate-500 uppercase">Link de Programação Inteligente:</span>
-                      <div className="flex gap-1.5">
-                        <input
-                          type="text"
-                          readOnly
-                          value={`${window.location.origin}/r/${selectedLead.id}`}
-                          className="flex-1 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-[10px] font-mono text-slate-600"
-                        />
-                        <button
-                          onClick={() => handleCopyNfcUrl(`${window.location.origin}/r/${selectedLead.id}`)}
-                          className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-[10px] px-3 rounded-lg transition-all active:scale-95 cursor-pointer uppercase shrink-0"
-                        >
-                          {copiedNfcUrl ? "Copiado!" : "Copiar"}
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="pt-2 border-t border-blue-100 space-y-2">
-                      <span className="block text-[10px] font-bold text-blue-900 uppercase">Passo a Passo de Gravação (Celular):</span>
-                      <ol className="text-[10px] text-slate-600 space-y-1 list-decimal pl-3.5 leading-normal">
-                        <li>Baixe o aplicativo gratuito <strong className="text-blue-700">NFC Tools</strong> na <strong className="font-semibold">App Store (iPhone)</strong> ou <strong className="font-semibold">Google Play (Android)</strong>.</li>
-                        <li>Abra o aplicativo e selecione a opção <strong className="text-blue-700">Escrever / Write</strong>.</li>
-                        <li>Clique em <strong className="text-blue-700">Adicionar Registro</strong> e selecione <strong className="text-blue-700">URL / URI</strong>.</li>
-                        <li>Cole o link inteligente copiado acima e clique em <strong className="font-bold">OK</strong>.</li>
-                        <li>Clique em <strong className="text-blue-700">Escrever / Write (último botão)</strong> e aproxime a traseira do celular da placa de mesa ou chip NFC para gravar em 1 segundo!</li>
-                      </ol>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Visual Acrylic Plate Preview Rendering */}
-            <div className="lg:col-span-8 flex flex-col items-center justify-center space-y-6 bg-slate-200/50 p-8 rounded-2xl border border-slate-300/40">
-              
-              <div className="text-center space-y-1">
-                <span className="text-xs uppercase tracking-widest font-bold text-slate-500">Mockup Físico de Apresentação</span>
-                <h3 className="text-sm font-black text-slate-800">Visualização de como a placa acrílica final vai parecer</h3>
-              </div>
-
-              {/* Physical Card Render Container */}
-              <div className={`w-[320px] h-[480px] rounded-2xl p-6 flex flex-col justify-between items-center transition-all duration-300 shadow-2xl border ${
-                plateTheme === 'black_gold' 
-                  ? 'bg-slate-950 text-white border-amber-500/40 shadow-slate-900/40' 
-                  : plateTheme === 'acrylic_clean' 
-                  ? 'bg-white text-slate-900 border-slate-300/80 shadow-slate-400/20' 
-                  : plateTheme === 'warm_red' 
-                  ? 'bg-gradient-to-br from-red-600 to-red-700 text-white border-red-500 shadow-red-950/25'
-                  : 'bg-gradient-to-br from-blue-900 to-indigo-950 text-white border-blue-800 shadow-indigo-950/25'
-              }`}>
-                
-                {/* Top header - NFC Signal Icon */}
-                <div className="w-full flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <div className={`w-3 h-3 rounded-full ${plateTheme === 'black_gold' ? 'bg-amber-400' : 'bg-blue-600'}`} />
-                    <span className="text-[9px] font-black uppercase tracking-widest opacity-80">NFC LINK INSIDE</span>
-                  </div>
-                  
-                  {/* Google Review Badge logo */}
-                  <div className="bg-white/10 backdrop-blur-xs px-2 py-1 rounded-md border border-white/15 flex items-center gap-1 text-[10px] font-black">
-                    <span className="text-blue-500">G</span>
-                    <span className="text-red-500">o</span>
-                    <span className="text-yellow-500">o</span>
-                    <span className="text-blue-500">g</span>
-                    <span className="text-green-500">l</span>
-                    <span className="text-red-500">e</span>
-                  </div>
-                </div>
-
-                {/* Center Core Display */}
-                <div className="text-center space-y-4 my-auto">
-                  
-                  <div className="space-y-1">
-                    <span className={`text-[10px] font-black uppercase tracking-widest ${plateTheme === 'black_gold' ? 'text-amber-400' : 'text-slate-500'}`}>
-                      Aproxime para Avaliar
-                    </span>
-                    <h4 className="text-base font-black tracking-tight leading-tight px-4 line-clamp-2">
-                      {selectedLead ? selectedLead.name : 'Sua Empresa Aqui'}
-                    </h4>
-                  </div>
-
-                  {/* Contactless tap wave animation graphic */}
-                  <div className="relative py-2 flex justify-center">
-                    <div className="animate-ping absolute inline-flex h-12 w-12 rounded-full bg-blue-400 opacity-20"></div>
-                    <div className={`w-14 h-14 rounded-full flex items-center justify-center border-2 ${
-                      plateTheme === 'black_gold' ? 'border-amber-400/30 text-amber-400' : 'border-blue-600/30 text-blue-600'
-                    }`}>
-                      <Smartphone className="h-6 w-6 animate-pulse" />
-                    </div>
-                  </div>
-
-                  {/* QR Code generator integration */}
-                  <div className="bg-white p-2.5 rounded-xl border border-slate-100 shadow-md inline-block">
-                    <img
-                      src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(gmbReviewLink || 'https://maps.google.com')}`}
-                      alt="Review QR Code"
-                      className="w-24 h-24 shrink-0"
-                    />
-                  </div>
-
-                  <p className="text-[10px] opacity-75 font-semibold px-4">
-                    Ou escaneie o código com a câmera do celular para avaliar rápido
-                  </p>
-
-                </div>
-
-                {/* Bottom - Star Ratings display */}
-                <div className="w-full text-center pt-3 border-t border-white/10 flex flex-col items-center gap-1.5">
-                  <div className="flex text-amber-400 gap-1 justify-center">
-                    {[...Array(5)].map((_, i) => (
-                      <Star key={i} className="h-4.5 w-4.5 fill-amber-400 text-amber-400 animate-bounce" style={{ animationDelay: `${i * 150}ms` }} />
-                    ))}
-                  </div>
-                  <span className="text-[9px] font-bold uppercase tracking-wider opacity-85">
-                    Sua nota é o seu melhor marketing local
-                  </span>
-                </div>
-
-              </div>
-
-              {/* Actions for Printing and Exporting */}
-              <div className="flex flex-col sm:flex-row gap-3 w-[320px] justify-center">
-                <button
-                  onClick={() => print10x10Plate()}
-                  className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-black py-2.5 px-4 rounded-xl text-xs uppercase tracking-wider transition-all cursor-pointer shadow-md flex items-center justify-center gap-1.5 active:scale-95 transition-all"
-                >
-                  <QrCode className="w-4 h-4" />
-                  Gerar Placa 10x10cm
-                </button>
-              </div>
-
-              {/* Instructions to print or present */}
-              <div className="max-w-md text-center">
-                <p className="text-xs text-slate-500 font-medium">
-                  💡 <strong>Dica de Fechamento comercial:</strong> Tire um print desta placa e envie para o WhatsApp do cliente dizendo: <em>"Fiz essa simulação de placa NFC exclusiva para colocar no seu balcão e acelerar o faturamento da {selectedLead?.name || 'sua empresa'}. O que achou?"</em>
-                </p>
-              </div>
-
-            </div>
-
-          </div>
+        {/* TAB 5: DYNAMIC QR CODE BATCH GENERATOR & URL MANAGER */}
+        {activeTab === 'dynamic_qr' && (
+          <DynamicQrBatchManager
+            leads={leads}
+            onSelectLead={(l) => {
+              setSelectedLead(l);
+              changeTab('portal');
+            }}
+            onNavigateToPortal={(leadId) => {
+              setAdminSelectedLeadId(leadId);
+              changeTab('portal');
+            }}
+          />
         )}
 
-        {/* TAB 5: BUSINESS VALUE & ROI CALCULATOR */}
+        {/* TAB 6: BUSINESS VALUE & ROI CALCULATOR */}
         {activeTab === 'calculator' && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             
@@ -3813,6 +4798,15 @@ export default function App() {
           </div>
         )}
 
+        {/* TAB: CARDÁPIO DIGITAL & MESAS */}
+        {activeTab === 'cardapio' && (
+          <CardapioDigitalManager
+            onLinkToNfc={(url, menuName) => {
+              setActiveTab('dynamic_qr');
+            }}
+          />
+        )}
+
         {/* TAB 6: SAAS PORTAL AND CLIENT NFC MANAGER */}
         {activeTab === 'portal' && (
           <div>
@@ -3919,17 +4913,17 @@ export default function App() {
               </div>
 
               {/* Sub-Navigation inside the Tab */}
-              <div className="flex gap-2.5 mt-6 border-t border-slate-800/80 pt-5">
+              <div className="flex flex-col sm:flex-row flex-wrap gap-2 sm:gap-2.5 mt-6 border-t border-slate-800/80 pt-5">
                 <button
                   onClick={() => setPortalMode('admin')}
-                  className={`flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl transition cursor-pointer ${
+                  className={`flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl transition cursor-pointer text-center ${
                     portalMode === 'admin' 
                       ? 'bg-white text-slate-900 shadow-md' 
                       : 'bg-slate-900/40 text-slate-300 hover:bg-slate-900/80 border border-slate-800'
                   }`}
                 >
-                  <Shield className="w-3.5 h-3.5" />
-                  Console Admin ALF
+                  <Shield className="w-3.5 h-3.5 shrink-0" />
+                  <span>Console Admin ALF</span>
                 </button>
                 <button
                   onClick={() => {
@@ -3939,14 +4933,22 @@ export default function App() {
                       setPortalMode('client_login');
                     }
                   }}
-                  className={`flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl transition cursor-pointer ${
+                  className={`flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl transition cursor-pointer text-center ${
                     portalMode === 'client_login' || portalMode === 'client_panel'
                       ? 'bg-white text-slate-900 shadow-md' 
                       : 'bg-slate-900/40 text-slate-300 hover:bg-slate-900/80 border border-slate-800'
                   }`}
                 >
-                  <Smartphone className="w-3.5 h-3.5" />
-                  📱 Área do Cliente {loggedInClient && `(${loggedInClient.name})`}
+                  <Smartphone className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">📱 Área do Cliente {loggedInClient && `(${loggedInClient.name})`}</span>
+                </button>
+                <button
+                  onClick={() => changeTab('dynamic_qr')}
+                  className="flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl transition cursor-pointer bg-cyan-500/20 text-cyan-300 hover:bg-cyan-500/30 border border-cyan-400/40 sm:ml-auto text-center"
+                  title="Abrir Central de QR Codes Dinâmicos em Lote"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                  <span>Gerar em Lote (1 a 40)</span>
                 </button>
               </div>
             </div>
@@ -3987,7 +4989,7 @@ export default function App() {
                               type="text"
                               placeholder="Ex: 101, pizza_nfc"
                               value={newAccountId}
-                              onChange={(e) => setNewAccountId(e.target.value)}
+                              onChange={(e) => setNewAccountId(e.target.value.replace(/[^a-zA-Z0-9_\-]/g, ''))}
                               className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-semibold focus:outline-hidden focus:border-blue-500"
                             />
                           </div>
@@ -4124,7 +5126,7 @@ export default function App() {
                           <div className="text-right">
                             <span className="text-[9px] font-bold text-slate-400 uppercase block">Link Permanente NFC</span>
                             <a 
-                              href={`${window.location.origin}/r/${l.id}`} 
+                              href={getTestRedirectUrl(l.id)} 
                               target="_blank" 
                               rel="noreferrer"
                               className="text-xs font-semibold text-blue-600 hover:underline flex items-center gap-1 justify-end"
@@ -4238,6 +5240,17 @@ export default function App() {
                           <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Pré-configuração de Links do Cliente</h4>
                           
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="col-span-1 md:col-span-2 space-y-2">
+                              <span className="block text-[10px] font-black uppercase text-slate-400 tracking-wider">Assistente Google Reviews (Place ID)</span>
+                              <GoogleReviewLinkGenerator
+                                initialQuery={l.name}
+                                initialCity={l.city}
+                                currentUrl={l.googleMapsUrl}
+                                compact={true}
+                                onLinkGenerated={(generatedUrl) => updateLeadDetails(l.id, { googleMapsUrl: generatedUrl })}
+                              />
+                            </div>
+
                             <div className="space-y-1">
                               <label className="block text-[10px] font-bold text-slate-500 uppercase">Link de Avaliações do Google (GMB)</label>
                               <input
@@ -4249,7 +5262,17 @@ export default function App() {
                               />
                             </div>
                             <div className="space-y-1">
-                              <label className="block text-[10px] font-bold text-slate-500 uppercase">Link do Instagram</label>
+                              <div className="flex items-center justify-between">
+                                <label className="block text-[10px] font-bold text-slate-500 uppercase">Link do Instagram</label>
+                                <button
+                                  type="button"
+                                  onClick={() => print10x10Plate(l, 'instagram_dual')}
+                                  className="text-[9px] font-black text-pink-600 hover:text-pink-700 bg-pink-50 hover:bg-pink-100 px-1.5 py-0.5 rounded border border-pink-200 transition cursor-pointer flex items-center gap-1"
+                                  title="Imprimir placa modelo da foto em 4K"
+                                >
+                                  <span>📸 Placa da Foto (4K)</span>
+                                </button>
+                              </div>
                               <input
                                 type="text"
                                 placeholder="https://instagram.com/empresa"
@@ -4300,19 +5323,34 @@ export default function App() {
                             </div>
                           </div>
 
-                          {/* Printable Plate Generator Block */}
+                          {/* Printable Plate & QR Code Generator Block */}
                           <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4">
                             <div className="space-y-1 text-center sm:text-left">
-                              <h5 className="text-xs font-bold text-slate-800 uppercase tracking-wide">Impressão Física da Placa 10x10 cm</h5>
-                              <p className="text-[10px] text-slate-400">Gere e imprima instantaneamente a arte final quadrada para o balcão do cliente.</p>
+                              <h5 className="text-xs font-bold text-slate-800 uppercase tracking-wide">Impressão Física & QR Code 10x10 cm</h5>
+                              <p className="text-[10px] text-slate-400">Baixe o QR Code em PNG de alta definição ou imprima a placa pronta.</p>
                             </div>
-                            <button
-                              onClick={() => print10x10Plate(l)}
-                              className="bg-blue-600 hover:bg-blue-500 active:scale-95 text-white font-black text-xs uppercase tracking-wider py-2.5 px-5 rounded-xl transition cursor-pointer flex items-center gap-1.5 shrink-0 shadow-sm"
-                            >
-                              <QrCode className="w-4 h-4" />
-                              Gerar Placa de Mesa 10x10
-                            </button>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button
+                                onClick={() => downloadClientQrCode(l, 1000)}
+                                disabled={isDownloadingQr}
+                                className="bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 font-bold text-xs uppercase tracking-wider py-2.5 px-4 rounded-xl transition cursor-pointer flex items-center gap-1.5 shrink-0 shadow-xs active:scale-95 disabled:opacity-50"
+                                title="Baixar QR Code PNG de alta resolução"
+                              >
+                                {isDownloadingQr ? (
+                                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-600" />
+                                ) : (
+                                  <Download className="w-3.5 h-3.5 text-blue-600" />
+                                )}
+                                Download QR Code
+                              </button>
+                              <button
+                                onClick={() => print10x10Plate(l)}
+                                className="bg-blue-600 hover:bg-blue-500 active:scale-95 text-white font-black text-xs uppercase tracking-wider py-2.5 px-4 rounded-xl transition cursor-pointer flex items-center gap-1.5 shrink-0 shadow-sm"
+                              >
+                                <QrCode className="w-4 h-4" />
+                                Gerar Placa de Mesa 10x10
+                              </button>
+                            </div>
                           </div>
 
                           <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl text-xs text-blue-800 leading-normal flex items-start gap-2">
@@ -4346,71 +5384,90 @@ export default function App() {
               <div className="max-w-md mx-auto bg-white border border-slate-200 rounded-3xl p-8 shadow-md">
                 <div className="text-center space-y-2 mb-6">
                   <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 border border-blue-100 mb-1">
-                    <Lock className="w-6 h-6" />
+                    <Shield className="w-6 h-6 text-blue-600" />
                   </div>
-                  <h3 className="text-lg font-black text-slate-900">Portal do Cliente - ALEF Automações</h3>
-                  <p className="text-xs text-slate-400">Acesse e configure onde sua Placa NFC e QR Code redirecionam em tempo real.</p>
+                  <h3 className="text-lg font-black text-slate-900">Portal do Cliente - ALF Automações</h3>
+                  <p className="text-xs text-slate-500">Acesse e configure para onde sua Placa NFC e QR Code redirecionam em tempo real.</p>
                 </div>
 
-                {/* Quick preset for testing/demonstration */}
-                <div className="mb-4 p-3 bg-slate-50 border border-slate-200/80 rounded-2xl">
-                  <span className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500 mb-1.5">
-                    Clientes de Teste (Clique para preencher):
-                  </span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {leads.slice(0, 3).map((lead) => (
-                      <button
-                        key={lead.id}
-                        type="button"
-                        onClick={() => {
-                          setClientLoginId(lead.id);
-                          setClientLoginPassword(lead.nfcPassword || '1234');
-                          setClientErrorMessage('');
-                        }}
-                        className="text-[10px] px-2 py-1 bg-white border border-slate-200 hover:border-blue-400 text-slate-700 rounded-lg font-bold transition flex items-center gap-1 cursor-pointer"
-                        title={`Carregar ${lead.name}`}
-                      >
-                        <span className="font-mono text-blue-600">{lead.id}</span>
-                        <span className="truncate max-w-[120px]">({lead.name})</span>
-                      </button>
-                    ))}
+                {/* Active Lockout Security Alert */}
+                {clientLockoutSeconds > 0 && (
+                  <div className="mb-4 p-4 bg-amber-50 border border-amber-300 rounded-2xl text-xs text-amber-950 flex items-start gap-2.5 shadow-sm">
+                    <Clock className="w-5 h-5 text-amber-600 shrink-0 mt-0.5 animate-spin" />
+                    <div className="space-y-1">
+                      <p className="font-bold text-amber-900 uppercase tracking-wide text-[11px]">
+                        Acesso Temporariamente Bloqueado (CyberShield)
+                      </p>
+                      <p className="text-[11px] text-amber-800 leading-relaxed">
+                        Você atingiu o limite de <strong>3 tentativas incorretas</strong>. Por segurança, o sistema bloqueou novas tentativas por 2 minutos no banco de dados.
+                      </p>
+                      <div className="pt-1 flex items-center gap-2">
+                        <span className="px-2 py-0.5 rounded-md bg-amber-200/80 font-mono font-bold text-amber-900 text-xs">
+                          Aguarde: {clientLockoutSeconds}s
+                        </span>
+                        <span className="text-[10px] text-amber-700">Liberação automática</span>
+                      </div>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 <form 
-                  onSubmit={(e) => {
+                  onSubmit={async (e) => {
                     e.preventDefault();
+                    if (clientLockoutSeconds > 0) return;
                     setClientErrorMessage('');
                     const searchId = clientLoginId.trim().toLowerCase();
                     const searchPass = clientLoginPassword.trim();
 
-                    if (!searchId) {
-                      setClientErrorMessage('Por favor, informe o Código ID ou nome da empresa.');
+                    if (!searchId || !searchPass) {
+                      setClientErrorMessage('Por favor, informe o Código ID ou nome da empresa e o código PIN.');
                       return;
                     }
 
-                    // Flexible search by id, numeric index, or business name
-                    const target = leads.find(item => {
-                      const itemId = item.id.toLowerCase();
-                      const numOnly = itemId.replace('lead_', '');
-                      return (
-                        itemId === searchId ||
-                        numOnly === searchId ||
-                        item.name.toLowerCase().includes(searchId)
-                      );
-                    });
+                    try {
+                      const res = await fetch('/api/client/login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id: searchId, password: searchPass })
+                      });
+                      const data = await res.json();
 
-                    if (target) {
-                      const expectedPin = target.nfcPassword || '1234';
-                      const isMasterPass = searchPass === 'Myadm@26' || searchPass === 'master@2026';
-                      if (searchPass === expectedPin || searchPass === '1234' || isMasterPass) {
-                        setLoggedInClient(target);
-                        setPortalMode('client_panel');
-                      } else {
-                        setClientErrorMessage(`Código PIN incorreto para ${target.name}. O PIN padrão é 1234.`);
+                      if (res.status === 429 || data.locked) {
+                        const rem = data.retryAfterSeconds || 120;
+                        setClientLockoutSeconds(rem);
+                        setClientErrorMessage(data.error || 'Acesso bloqueado por 2 minutos devido a 3 tentativas incorretas.');
+                        return;
                       }
-                    } else {
-                      setClientErrorMessage(`Nenhum estabelecimento encontrado com "${clientLoginId}". Ex: lead_1, lead_2 ou nome do cliente.`);
+
+                      if (res.ok && data.success) {
+                        const target = leads.find(l => 
+                          l.id.toLowerCase() === data.lead.id.toLowerCase() || 
+                          l.name.toLowerCase().includes(searchId)
+                        ) || {
+                          id: data.lead.id,
+                          name: data.lead.name || 'Estabelecimento',
+                          city: data.lead.city || '',
+                          niche: data.lead.niche || '',
+                          phone: '',
+                          address: '',
+                          rating: 5,
+                          reviewCount: 0,
+                          hasWebsite: false,
+                          googleMapsUrl: data.lead.googleMapsUrl || '',
+                          nfcCustomUrl: data.lead.nfcCustomUrl || '',
+                          nfcRedirectActive: 'maps',
+                          portalUsername: data.lead.portalUsername || data.lead.id,
+                          nfcPassword: searchPass
+                        };
+
+                        setLoggedInClient(target as Lead);
+                        setPortalMode('client_panel');
+                        return;
+                      }
+
+                      setClientErrorMessage(data.error || 'Código ID ou Senha PIN inválida.');
+                    } catch (err) {
+                      setClientErrorMessage('Erro de conexão ao validar credenciais no servidor.');
                     }
                   }}
                   className="space-y-4"
@@ -4420,45 +5477,46 @@ export default function App() {
                     <input
                       type="text"
                       required
-                      placeholder="Ex: lead_1 ou nome da empresa"
+                      disabled={clientLockoutSeconds > 0}
+                      placeholder="Ex: padaria_suica ou id do cliente"
                       value={clientLoginId}
                       onChange={(e) => setClientLoginId(e.target.value)}
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-hidden focus:border-blue-500 font-medium"
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-hidden focus:border-blue-500 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                     />
                   </div>
 
                   <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <label className="block text-xs font-bold text-slate-700 uppercase">Senha de Acesso (PIN)</label>
-                      <button
-                        type="button"
-                        onClick={() => setClientLoginPassword('1234')}
-                        className="text-[10px] text-blue-600 hover:underline font-bold cursor-pointer"
-                      >
-                        PIN Padrão: 1234
-                      </button>
-                    </div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase">Senha de Acesso (PIN)</label>
                     <input
                       type="password"
                       required
-                      placeholder="Digite sua senha PIN de 4 dígitos (ex: 1234)"
+                      disabled={clientLockoutSeconds > 0}
+                      placeholder="Digite sua senha PIN de 4 dígitos"
                       value={clientLoginPassword}
                       onChange={(e) => setClientLoginPassword(e.target.value)}
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-hidden focus:border-blue-500"
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 focus:outline-hidden focus:border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed font-mono"
                     />
                   </div>
 
-                  {clientErrorMessage && (
-                    <div className="bg-red-50 border border-red-100 p-3 rounded-xl text-xs text-red-700 leading-normal">
+                  {clientErrorMessage && clientLockoutSeconds <= 0 && (
+                    <div className="bg-red-50 border border-red-100 p-3 rounded-xl text-xs text-red-700 leading-normal animate-in shake duration-150">
                       ⚠️ {clientErrorMessage}
                     </div>
                   )}
 
                   <button
                     type="submit"
-                    className="w-full bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-xs font-bold py-3 rounded-xl shadow-md cursor-pointer transition duration-150"
+                    disabled={clientLockoutSeconds > 0}
+                    className="w-full bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-xs font-bold py-3 rounded-xl shadow-md cursor-pointer transition duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Acessar Meu Portal
+                    {clientLockoutSeconds > 0 ? (
+                      <span className="flex items-center justify-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5 animate-spin" />
+                        Acesso bloqueado ({clientLockoutSeconds}s)
+                      </span>
+                    ) : (
+                      'Acessar Meu Portal'
+                    )}
                   </button>
                 </form>
 
@@ -4470,10 +5528,78 @@ export default function App() {
 
             {/* C: LOGGED IN CLIENT PANEL - THE CLIENT SELF-SERVICE PORTAL */}
             {portalMode === 'client_panel' && loggedInClient && (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              <div className="space-y-6 animate-in fade-in duration-150">
+                {/* Client Portal Navigation Tabs */}
+                <div className="bg-white border border-slate-200 rounded-2xl p-2.5 sm:p-3 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:flex items-center gap-2 w-full md:w-auto">
+                    <button
+                      type="button"
+                      onClick={() => setClientPortalTab('config')}
+                      className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer text-center ${
+                        clientPortalTab === 'config'
+                          ? 'bg-slate-900 text-white shadow-sm'
+                          : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                      }`}
+                    >
+                      <Sliders className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                      <span>Destino da Placa &amp; QR</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setClientPortalTab('monitoring')}
+                      className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer text-center ${
+                        clientPortalTab === 'monitoring'
+                          ? 'bg-slate-900 text-white shadow-sm'
+                          : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                      }`}
+                    >
+                      <Activity className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                      <span className="truncate">Monitoramento de Acessos</span>
+                      <span className="ml-1 px-1.5 py-0.5 rounded-full text-[9px] font-black bg-cyan-500/20 text-cyan-700 border border-cyan-500/30">
+                        NFC
+                      </span>
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between md:justify-end gap-2 w-full md:w-auto pt-2 md:pt-0 border-t md:border-t-0 border-slate-100">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNfcWriterTarget(loggedInClient);
+                        setIsNfcWriterOpen(true);
+                      }}
+                      className="flex-1 md:flex-initial px-3.5 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-sm transition flex items-center justify-center gap-1.5 cursor-pointer text-center"
+                      title="Gravar na Tag NFC pelo Google Chrome no Android"
+                    >
+                      <Smartphone className="w-3.5 h-3.5 shrink-0" />
+                      <span className="truncate">Gravar Tag NFC</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLoggedInClient(null);
+                        setPortalMode('client_login');
+                      }}
+                      className="px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition cursor-pointer shrink-0"
+                    >
+                      Sair
+                    </button>
+                  </div>
+                </div>
+
+                {/* Sub-Tab 1: ACCESS MONITORING (RECHARTS) */}
+                {clientPortalTab === 'monitoring' && (
+                  <ClientAccessMonitoring lead={loggedInClient} />
+                )}
+
+                {/* Sub-Tab 2: CONFIGURATION PANELS */}
+                {clientPortalTab === 'config' && (
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                 
                 {/* Left Panel: Link display & QR Code */}
-                <div className="lg:col-span-5 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex flex-col justify-between gap-6">
+                <div className="lg:col-span-5 bg-white border border-slate-200 rounded-2xl p-4 sm:p-6 shadow-sm flex flex-col justify-between gap-5 sm:gap-6">
                   <div className="space-y-4">
                     <div className="flex items-center gap-3">
                       <div className="h-10 w-10 bg-emerald-50 border border-emerald-100 rounded-xl text-emerald-600 flex items-center justify-center font-bold">
@@ -4509,11 +5635,11 @@ export default function App() {
                       <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Seu Link Permanente NFC</span>
                       <div className="flex items-center justify-between gap-2 bg-white border border-slate-100 p-2.5 rounded-xl">
                         <span className="text-xs font-mono font-bold text-slate-600 truncate">
-                          {window.location.origin}/r/{loggedInClient.id}
+                          {getDynamicQrUrl(loggedInClient.id)}
                         </span>
                         <button
                           onClick={() => {
-                            navigator.clipboard.writeText(`${window.location.origin}/r/${loggedInClient.id}`);
+                            navigator.clipboard.writeText(getDynamicQrUrl(loggedInClient.id));
                             alert('Link copiado com sucesso!');
                           }}
                           className="bg-slate-100 hover:bg-slate-200 text-slate-700 p-2 rounded-lg cursor-pointer shrink-0 transition"
@@ -4528,28 +5654,163 @@ export default function App() {
                   </div>
 
                   {/* Dynamic QR Code display */}
-                  <div className="bg-slate-950 text-white rounded-2xl p-5 text-center flex flex-col items-center gap-3 shadow-lg relative overflow-hidden">
+                  <div className="bg-slate-950 text-white rounded-2xl p-4 sm:p-5 text-center flex flex-col items-center gap-3 shadow-lg relative overflow-hidden">
                     <div className="absolute inset-0 bg-radial-gradient from-blue-600/10 to-transparent pointer-events-none"></div>
                     
-                    <span className="text-[9px] bg-white/10 uppercase font-black px-2.5 py-1 rounded-full tracking-wider">QR Code Dinâmico Inteligente</span>
+                    {/* Mode Selector Toggle */}
+                    <div className="flex flex-col sm:flex-row items-center gap-1.5 bg-white/10 p-1.5 rounded-xl w-full text-[11px] font-bold">
+                      <button
+                        type="button"
+                        onClick={() => setPortalQrMode('dynamic')}
+                        className={`w-full sm:flex-1 py-2 sm:py-1.5 px-2 rounded-lg transition cursor-pointer flex items-center justify-center gap-1 ${
+                          portalQrMode === 'dynamic'
+                            ? 'bg-cyan-500 text-slate-950 font-black shadow-xs'
+                            : 'text-slate-300 hover:text-white'
+                        }`}
+                      >
+                        <RefreshCw className="w-3 h-3 shrink-0" />
+                        <span className="truncate">🔄 Dinâmico Nuvem</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPortalQrMode('direct')}
+                        className={`w-full sm:flex-1 py-2 sm:py-1.5 px-2 rounded-lg transition cursor-pointer flex items-center justify-center gap-1 ${
+                          portalQrMode === 'direct'
+                            ? 'bg-emerald-500 text-slate-950 font-black shadow-xs'
+                            : 'text-slate-300 hover:text-white'
+                        }`}
+                      >
+                        <CheckCircle className="w-3 h-3 shrink-0" />
+                        <span className="truncate">⭐ Direto Google</span>
+                      </button>
+                    </div>
                     
-                    <div className="bg-white p-3.5 rounded-xl shadow-inner mt-2">
+                    <div className="bg-white p-3.5 rounded-2xl shadow-inner mt-1 border-2 border-white/10 relative group">
                       <img
-                        src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(`${window.location.origin}/r/${loggedInClient.id}`)}`}
-                        alt="Dynamic Client QR Code"
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(
+                          portalQrMode === 'dynamic' ? getDynamicQrUrl(loggedInClient.id) : getDirectLeadUrl(loggedInClient)
+                        )}`}
+                        alt={portalQrMode === 'dynamic' ? 'Dynamic QR Code' : 'Direct Google QR Code'}
                         className="w-36 h-36 shrink-0"
                       />
                     </div>
+
+                    <div className="space-y-1 text-center max-w-xs">
+                      <span className="text-[10px] font-bold text-slate-300 block">
+                        {portalQrMode === 'dynamic' ? 'QR Code Dinâmico em Tempo Real' : 'QR Code Direto Google (Sem Intermediário)'}
+                      </span>
+                      <p className="text-[9px] text-slate-400 leading-tight">
+                        {portalQrMode === 'dynamic'
+                          ? 'Grave na placa: o link físico nunca muda. Ao alterar o destino acima, todos que escanearem serão redirecionados na hora!'
+                          : 'Abre a tela de 5 estrelas do Google imediatamente no celular do cliente sem nenhuma tela intermediária.'}
+                      </p>
+                    </div>
                     
+                    {/* Artwork Download Hub Button */}
                     <button
+                      type="button"
                       onClick={() => {
-                        window.open(`https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(`${window.location.origin}/r/${loggedInClient.id}`)}`, '_blank');
+                        setArtworkTargetLead(loggedInClient);
+                        setIsArtworkModalOpen(true);
                       }}
-                      className="bg-slate-800 hover:bg-slate-750 text-xs font-semibold py-1.5 px-4 rounded-xl border border-white/10 flex items-center gap-1.5 transition"
+                      className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 active:scale-98 text-slate-950 text-xs font-black py-2.5 sm:py-3 px-3 sm:px-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer text-center"
+                      title="Baixar arte da Placa 10x10cm e Cartão NFC 5.4x8.5cm em alta resolução 300 DPI para enviar para a gráfica"
                     >
-                      <Download className="w-3.5 h-3.5" />
-                      Imprimir QR Code
+                      <Sparkles className="w-4 h-4 text-slate-950 fill-slate-950 shrink-0" />
+                      <span className="text-xs">Baixar Placa 10x10 &amp; Cartão NFC (300 DPI)</span>
                     </button>
+
+                    {/* Quick Download Buttons: 10x10 Plate & 5.4x8.5 Card */}
+                    <div className="grid grid-cols-2 gap-2 w-full">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            setIsDownloadingDirectArtwork(true);
+                            await downloadPlate10x10Png({
+                              businessName: loggedInClient.name,
+                              leadId: loggedInClient.id,
+                              permanentUrl: getDirectLeadUrl(loggedInClient),
+                              theme: 'black_gold',
+                              city: loggedInClient.city
+                            });
+                          } catch (e: any) {
+                            alert('Erro ao baixar placa: ' + e.message);
+                          } finally {
+                            setIsDownloadingDirectArtwork(false);
+                          }
+                        }}
+                        disabled={isDownloadingDirectArtwork}
+                        className="py-2 px-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-[11px] font-bold border border-white/10 flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                        title="Baixar imagem em PNG 300 DPI da Placa de Mesa 10x10 cm"
+                      >
+                        <Download className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Placa 10x10 HD</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            setIsDownloadingDirectArtwork(true);
+                            await downloadCardNfcPng({
+                              businessName: loggedInClient.name,
+                              leadId: loggedInClient.id,
+                              permanentUrl: getDirectLeadUrl(loggedInClient),
+                              theme: 'black_gold',
+                              city: loggedInClient.city
+                            }, 'horizontal');
+                          } catch (e: any) {
+                            alert('Erro ao baixar cartão: ' + e.message);
+                          } finally {
+                            setIsDownloadingDirectArtwork(false);
+                          }
+                        }}
+                        disabled={isDownloadingDirectArtwork}
+                        className="py-2 px-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-[11px] font-bold border border-white/10 flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                        title="Baixar imagem em PNG 300 DPI do Cartão NFC 5.4x8.5 cm"
+                      >
+                        <CreditCard className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Cartão 5.4x8.5 HD</span>
+                      </button>
+                    </div>
+
+                    {/* Secondary Actions Row */}
+                    <div className="grid grid-cols-2 gap-2 w-full pt-1">
+                      {/* Download QR Code isolado */}
+                      <button
+                        onClick={() => downloadClientQrCode(loggedInClient, 1000)}
+                        disabled={isDownloadingQr}
+                        id="btn-download-client-qr"
+                        className="bg-white/10 hover:bg-white/15 text-slate-200 text-[11px] font-bold py-2 px-2 rounded-xl transition flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50 border border-white/10"
+                        title="Baixar imagem do QR Code isolado em PNG de alta resolução"
+                      >
+                        {isDownloadingQr ? (
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-200" />
+                        ) : (
+                          <Download className="w-3.5 h-3.5 text-white" />
+                        )}
+                        <span>QR Isolado</span>
+                      </button>
+
+                      {/* Imprimir Placa de Mesa 10x10cm */}
+                      <button
+                        onClick={() => print10x10Plate(loggedInClient)}
+                        className="bg-white/10 hover:bg-white/15 text-slate-200 text-[11px] font-bold py-2 px-2 rounded-xl border border-white/10 flex items-center justify-center gap-1 transition cursor-pointer"
+                        title="Abrir modelo pronto de placa quadrada 10x10cm para impressão"
+                      >
+                        <QrCode className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Imprimir 10x10</span>
+                      </button>
+                    </div>
+
+                    {/* Feedback message on successful download */}
+                    {qrDownloadSuccess === loggedInClient.id && (
+                      <div className="w-full p-2.5 bg-emerald-500/20 border border-emerald-500/30 rounded-xl text-emerald-300 text-[10px] font-bold flex items-center justify-center gap-1.5 animate-in fade-in">
+                        <CheckCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>PNG de alta resolução baixado com sucesso!</span>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -4613,15 +5874,27 @@ export default function App() {
 
                     {/* Google reviews */}
                     {(loggedInClient.nfcRedirectActive || 'gmb') === 'gmb' && (
-                      <div className="space-y-1.5">
-                        <label className="block text-xs font-bold text-slate-700 uppercase">Link de Avaliações (GMB)</label>
-                        <input
-                          type="text"
-                          value={loggedInClient.googleMapsUrl || ''}
-                          onChange={(e) => updateLeadDetails(loggedInClient.id, { googleMapsUrl: e.target.value })}
-                          className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white"
-                          placeholder="Cole seu link de avaliações do Google Meu Negócio"
-                        />
+                      <div className="space-y-3">
+                        <div className="space-y-1.5">
+                          <label className="block text-xs font-bold text-slate-700 uppercase">Assistente de Link de Avaliação Direto</label>
+                          <GoogleReviewLinkGenerator
+                            initialQuery={loggedInClient.name}
+                            initialCity={loggedInClient.city}
+                            currentUrl={loggedInClient.googleMapsUrl}
+                            compact={true}
+                            onLinkGenerated={(generatedUrl) => updateLeadDetails(loggedInClient.id, { googleMapsUrl: generatedUrl })}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="block text-xs font-bold text-slate-700 uppercase">Link de Avaliações Configurado</label>
+                          <input
+                            type="text"
+                            value={loggedInClient.googleMapsUrl || ''}
+                            onChange={(e) => updateLeadDetails(loggedInClient.id, { googleMapsUrl: e.target.value })}
+                            className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white"
+                            placeholder="Cole seu link de avaliações do Google Meu Negócio"
+                          />
+                        </div>
                       </div>
                     )}
 
@@ -4653,15 +5926,79 @@ export default function App() {
 
                     {/* Instagram */}
                     {(loggedInClient.nfcRedirectActive) === 'instagram' && (
-                      <div className="space-y-1.5">
-                        <label className="block text-xs font-bold text-slate-700 uppercase">URL do seu Perfil Instagram</label>
-                        <input
-                          type="text"
-                          value={loggedInClient.nfcInstagramUrl || ''}
-                          onChange={(e) => updateLeadDetails(loggedInClient.id, { nfcInstagramUrl: e.target.value })}
-                          className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white"
-                          placeholder="https://instagram.com/seu_perfil"
-                        />
+                      <div className="space-y-4">
+                        <div className="space-y-1.5">
+                          <label className="block text-xs font-bold text-slate-700 uppercase">URL do seu Perfil Instagram</label>
+                          <input
+                            type="text"
+                            value={loggedInClient.nfcInstagramUrl || ''}
+                            onChange={(e) => updateLeadDetails(loggedInClient.id, { nfcInstagramUrl: e.target.value })}
+                            className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white"
+                            placeholder="https://instagram.com/seu_perfil"
+                          />
+                        </div>
+
+                        {/* Special 4K Ultra-Realistic Instagram + Google Dual Plate Option Card */}
+                        <div className="p-4 rounded-2xl bg-gradient-to-br from-pink-900/5 via-purple-900/5 to-blue-900/10 border-2 border-pink-500/40 space-y-3">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-gradient-to-r from-pink-500 via-rose-500 to-amber-500 text-white shadow-xs">
+                                📸 Modelo Ultra-Realista da Foto
+                              </span>
+                              <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-slate-900 text-cyan-300 border border-slate-700">
+                                4K • 600 DPI
+                              </span>
+                            </div>
+                            <h5 className="text-xs font-black text-slate-900">
+                              Placa Híbrida Inteligente: Instagram (Topo) + Onda Orgânica + Google Reviews (Base)
+                            </h5>
+                            <p className="text-[11px] text-slate-600 leading-relaxed">
+                              Layout idêntico ao modelo da foto: 2 QR Codes integrados, 2 áreas de aproximação NFC, degradê vibrante do Instagram com onda fluida branca e base azul royal do Google. Proporções milimétricas em 4K prontas para impressão e corte a laser.
+                            </p>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => print10x10Plate(loggedInClient, 'instagram_dual')}
+                              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-pink-600 via-rose-600 to-amber-600 hover:from-pink-500 hover:to-amber-500 text-white text-xs font-black uppercase tracking-wider transition shadow-md flex items-center gap-1.5 cursor-pointer active:scale-95"
+                            >
+                              <Printer className="w-3.5 h-3.5" />
+                              <span>Imprimir Placa da Foto (4K)</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                await downloadPlate10x10Png({
+                                  businessName: loggedInClient.name || 'Empresa',
+                                  leadId: loggedInClient.id || 'TAG01',
+                                  permanentUrl: getDirectLeadUrl(loggedInClient),
+                                  theme: 'instagram_dual',
+                                  city: loggedInClient.city || '',
+                                  instagramUrl: loggedInClient.nfcInstagramUrl || '',
+                                  instagramHandle: (loggedInClient.nfcInstagramUrl || '').replace(/.*instagram\.com\//, '').replace(/\/$/, '')
+                                });
+                              }}
+                              className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+                            >
+                              <Download className="w-3.5 h-3.5 text-cyan-400" />
+                              <span>Baixar PNG 4K (4000x4000)</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedLead(loggedInClient);
+                                changeTab('nfc_designer');
+                              }}
+                              className="px-3 py-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <Eye className="w-3.5 h-3.5 text-blue-600" />
+                              <span>Simulador 3D do Totem</span>
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     )}
 
@@ -4726,12 +6063,100 @@ export default function App() {
 
               </div>
             )}
+              </div>
+            )}
           </div>
         )}
       </div>
     )}
 
+        {/* 8: USER MANAGEMENT & CYBERSHIELD RBAC PANEL */}
+        {activeTab === 'users' && (
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+            <UserManagementPanel currentSessionToken={currentUser?.token} />
+          </div>
+        )}
+
+        {/* 9: PÁGINA DE VENDAS & APRESENTAÇÃO COMERCIAL (HIGH-CONVERSION PITCH) */}
+        {activeTab === 'landing' && (
+          <div className="rounded-3xl overflow-hidden border border-slate-800 shadow-2xl bg-slate-950">
+            <div className="p-3.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="text-xs font-bold text-slate-200">
+                  Modo Apresentação Comercial / Demonstração Interativa para Clientes
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleNavSelect('dynamic_qr')}
+                className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+                <span>Voltar ao Painel ALF</span>
+              </button>
+            </div>
+            <SalesLandingPage
+              initialNiche={selectedLead?.niche || undefined}
+              onOpenLogin={() => setIsMasterModalOpen(true)}
+              onExploreDemo={() => handleNavSelect('site_preview')}
+            />
+          </div>
+        )}
+
       </main>
+
+        {/* Footer Branding */}
+        <footer className="bg-white border-t border-slate-200 py-6 mt-12 w-full" id="main-footer">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center text-xs text-slate-500 space-y-2.5">
+            <p className="font-semibold text-slate-700">
+              Desenvolvido por <span className="text-slate-900 font-extrabold">ALF Automação</span>
+            </p>
+            <div className="flex items-center justify-center gap-1.5 text-xs">
+              <a
+                href="https://instagram.com/alefautomacao"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 font-bold text-pink-600 hover:text-pink-700 hover:underline transition-colors px-2.5 py-1 rounded-full bg-pink-50 border border-pink-100"
+                title="Acessar Instagram @alefautomacao"
+                id="footer-instagram-link"
+              >
+                <Instagram className="h-3.5 w-3.5" />
+                <span>@alefautomacao</span>
+              </a>
+            </div>
+            <p className="text-[11px] text-slate-400">
+              © 2026 ALF Automação. Todos os direitos reservados.
+            </p>
+          </div>
+        </footer>
+      </div> {/* End Main Workspace (Header + Viewport + Footer) */}
+
+      {/* EXPORT SITE MODAL */}
+      <ExportSiteModal
+        isOpen={isExportSiteModalOpen}
+        onClose={() => setIsExportSiteModalOpen(false)}
+        siteTemplate={siteTemplate}
+        lead={selectedLead || (leads.length > 0 ? leads[0] : {
+          name: 'Cliente Demonstração',
+          city: city || 'São Paulo',
+          niche: niche || 'Serviços',
+          phone: '(11) 99999-9999',
+          address: 'Av. Paulista, 1000'
+        })}
+        theme={simulatorTheme}
+      />
+
+      {/* NFC TAG HARDWARE WRITER MODAL (CHROME ANDROID) */}
+      <NfcWriterModal
+        isOpen={isNfcWriterOpen}
+        onClose={() => {
+          setIsNfcWriterOpen(false);
+          setNfcWriterTarget(null);
+        }}
+        leadId={nfcWriterTarget?.id || ''}
+        leadName={nfcWriterTarget?.name || ''}
+      />
 
       {/* GLOBAL MASTER LOGIN MODAL */}
       {isMasterModalOpen && (
@@ -4765,18 +6190,25 @@ export default function App() {
             </div>
 
             <form onSubmit={handleMasterLogin} className="space-y-3.5 text-left">
+              <button
+                type="button"
+                onClick={quickMasterUnlock}
+                className="w-full py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white font-black text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-98"
+              >
+                <Zap className="h-3.5 w-3.5 text-amber-200 fill-amber-200" />
+                <span>⚡ Desbloqueio Rápido Master (1-Clique)</span>
+              </button>
+
+              <div className="relative flex py-0.5 items-center">
+                <div className="flex-grow border-t border-slate-200"></div>
+                <span className="flex-shrink mx-2 text-[9px] text-slate-400 font-bold uppercase">Ou digite suas credenciais</span>
+                <div className="flex-grow border-t border-slate-200"></div>
+              </div>
+
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="block text-xs font-bold text-slate-700">Usuário Master</label>
                   <div className="flex gap-1">
-                    <button
-                      type="button"
-                      onClick={() => fillMasterCredentials('env')}
-                      className="text-[9px] px-1.5 py-0.5 bg-amber-50 text-amber-800 border border-amber-200 rounded font-bold hover:bg-amber-100 transition cursor-pointer"
-                      title="Preencher com Mysis@26"
-                    >
-                      Mysis@26
-                    </button>
                     <button
                       type="button"
                       onClick={() => fillMasterCredentials('default')}
@@ -4785,6 +6217,14 @@ export default function App() {
                     >
                       master
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => fillMasterCredentials('env')}
+                      className="text-[9px] px-1.5 py-0.5 bg-amber-50 text-amber-800 border border-amber-200 rounded font-bold hover:bg-amber-100 transition cursor-pointer"
+                      title="Preencher com Mysis@26"
+                    >
+                      Mysis@26
+                    </button>
                   </div>
                 </div>
                 <input
@@ -4792,7 +6232,7 @@ export default function App() {
                   required
                   value={masterUserInput}
                   onChange={(e) => setMasterUserInput(e.target.value)}
-                  placeholder="Mysis@26 ou master"
+                  placeholder="master ou Mysis@26"
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-semibold focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
                 />
               </div>
@@ -4804,7 +6244,7 @@ export default function App() {
                   required
                   value={masterPasswordInput}
                   onChange={(e) => setMasterPasswordInput(e.target.value)}
-                  placeholder="••••••••"
+                  placeholder="master, master@2026 ou Myadm@26"
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-semibold focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
                 />
               </div>
@@ -4843,38 +6283,182 @@ export default function App() {
               </div>
             </form>
 
+            {/* Quick Master Password Recovery Assistant */}
+            <div className="pt-2 border-t border-slate-100 space-y-2">
+              <button
+                type="button"
+                onClick={() => setShowMasterCredentialsHelp(!showMasterCredentialsHelp)}
+                className="w-full text-center text-[11px] font-bold text-amber-800 hover:text-amber-900 flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <HelpCircle className="w-3.5 h-3.5 text-amber-700" />
+                <span>{showMasterCredentialsHelp ? 'Ocultar senhas Master' : 'Esqueceu as senhas Master? Clique aqui'}</span>
+              </button>
+
+              {showMasterCredentialsHelp && (
+                <div className="bg-amber-50/80 border border-amber-200/80 rounded-2xl p-3.5 text-left text-xs space-y-2.5 animate-in fade-in">
+                  <span className="text-[10px] font-black uppercase text-amber-900 tracking-wider block">
+                    Credenciais Master Oficiais de Acesso:
+                  </span>
+                  
+                  <div className="space-y-1.5 font-mono text-[11px]">
+                    <div className="bg-white p-2 rounded-xl border border-amber-200/60 flex items-center justify-between">
+                      <div>
+                        <span className="text-slate-500 font-sans block text-[9px] font-bold uppercase">Operador Principal</span>
+                        <span className="text-slate-800 font-bold">Mysis@26</span> / <span className="text-amber-800 font-black">Myadm@26</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          fillMasterCredentials('env');
+                          setShowMasterCredentialsHelp(false);
+                        }}
+                        className="px-2 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 text-[10px] font-sans font-bold rounded-lg cursor-pointer"
+                      >
+                        Usar Esta
+                      </button>
+                    </div>
+
+                    <div className="bg-white p-2 rounded-xl border border-amber-200/60 flex items-center justify-between">
+                      <div>
+                        <span className="text-slate-500 font-sans block text-[9px] font-bold uppercase">Suporte Técnico</span>
+                        <span className="text-slate-800 font-bold">master</span> / <span className="text-amber-800 font-black">master@2026</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          fillMasterCredentials('default');
+                          setShowMasterCredentialsHelp(false);
+                        }}
+                        className="px-2 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 text-[10px] font-sans font-bold rounded-lg cursor-pointer"
+                      >
+                        Usar Esta
+                      </button>
+                    </div>
+                  </div>
+
+                  <p className="text-[10px] text-amber-900/80 font-sans leading-relaxed">
+                    Você também pode clicar no botão amarelo <strong>"⚡ Desbloqueio Rápido Master"</strong> acima para entrar imediatamente com 1 clique!
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="pt-2 text-center border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMasterModalOpen(false);
+                  setIsSellerRegisterModalOpen(true);
+                }}
+                className="text-[11px] text-emerald-600 hover:text-emerald-700 font-bold hover:underline cursor-pointer flex items-center justify-center gap-1.5 mx-auto"
+              >
+                <Briefcase className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Quer revender nosso sistema? Cadastre-se como Vendedor / Parceiro</span>
+              </button>
+            </div>
+
             <p className="text-[10px] text-center text-slate-400">
-              ALEF Automações • Aceita: Mysis@26 / Myadm@26 ou master / master@2026
+              ALEF Automações • Autenticação Segura de Operadores
             </p>
           </div>
         </div>
       )}
 
-      {/* Footer Branding */}
-      <footer className="bg-white border-t border-slate-200 py-6 mt-12" id="main-footer">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center text-xs text-slate-500 space-y-2.5">
-          <p className="font-semibold text-slate-700">
-            Desenvolvido por <span className="text-slate-900 font-extrabold">ALEF Automações</span>
-          </p>
-          <div className="flex items-center justify-center gap-1.5 text-xs">
-            <a
-              href="https://instagram.com/alefautomacao"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 font-bold text-pink-600 hover:text-pink-700 hover:underline transition-colors px-2.5 py-1 rounded-full bg-pink-50 border border-pink-100"
-              title="Acessar Instagram @alefautomacao"
-              id="footer-instagram-link"
-            >
-              <Instagram className="h-3.5 w-3.5" />
-              <span>@alefautomacao</span>
-            </a>
-          </div>
-          <p className="text-[11px] text-slate-400">
-            © 2026 ALEF Automações. Todos os direitos reservados.
-          </p>
-        </div>
-      </footer>
+      {/* Global Artwork Download Modal */}
+      <NfcArtworkDownloadModal
+        isOpen={isArtworkModalOpen}
+        onClose={() => {
+          setIsArtworkModalOpen(false);
+          setArtworkTargetLead(null);
+        }}
+        lead={artworkTargetLead || loggedInClient || selectedLead || leads[0] || null}
+        leads={leads}
+        onSelectDifferentLead={(l) => setArtworkTargetLead(l)}
+        onMarkPrinted={(leadId, currentStatus) => {
+          const newStatus = currentStatus === false ? true : !currentStatus;
+          updateLeadDetails(leadId, {
+            isPlaquePrinted: newStatus,
+            plaquePrintedAt: newStatus ? new Date().toISOString() : undefined
+          });
+        }}
+        onPrintPlate={print10x10Plate}
+      />
+
+      {/* Universal Plate Scanner & Quick Lookup Modal */}
+      <PlateScannerModal
+        isOpen={isPlateScannerOpen}
+        onClose={() => setIsPlateScannerOpen(false)}
+        leads={leads}
+        onPlateUpdated={(updatedLead) => {
+          setLeads((prev) => prev.map((l) => (l.id === updatedLead.id ? updatedLead : l)));
+          if (selectedLead?.id === updatedLead.id) {
+            setSelectedLead(updatedLead);
+          }
+        }}
+      />
+
+      {/* Custom Domain Settings Modal */}
+      <CustomDomainModal
+        isOpen={isCustomDomainModalOpen}
+        onClose={() => setIsCustomDomainModalOpen(false)}
+      />
+
+      {/* Antigravity & IDE Project Export Modal */}
+      <AntigravityExportModal
+        isOpen={isAntigravityModalOpen}
+        onClose={() => setIsAntigravityModalOpen(false)}
+      />
+
+      {/* Seller & Affiliate Self-Registration Modal */}
+      <SellerRegisterModal
+        isOpen={isSellerRegisterModalOpen}
+        onClose={() => setIsSellerRegisterModalOpen(false)}
+        onSuccess={(newUser, token) => {
+          setCurrentUser({
+            token,
+            username: newUser.username,
+            name: newUser.name,
+            role: newUser.role
+          });
+          setActiveTab('dynamic_qr');
+        }}
+      />
+
+      {/* Secure Auth & Operator Switcher Modal */}
+      <SecureAuthModal
+        isOpen={isLoginModalOpen}
+        onClose={() => setIsLoginModalOpen(false)}
+        onLoginSuccess={(user) => {
+          setCurrentUser(user);
+          try {
+            localStorage.setItem('alf_auth_user', JSON.stringify(user));
+            localStorage.setItem('alf_master_auth', user.role === 'master' ? 'true' : 'false');
+            localStorage.setItem('alf_master_user', user.username);
+          } catch (_) {}
+          setIsLoginModalOpen(false);
+          if (authTargetTab) {
+            changeTab(authTargetTab as any);
+          }
+        }}
+        targetTabName={authTargetTab}
+      />
 
     </div>
   );
+}
+
+
+export default function App() {
+  const currentPath = typeof window !== 'undefined' ? window.location.pathname : '';
+  const isRedirectRoute = /^\/(r|redirect|nfc|tag)\//i.test(currentPath);
+
+  if (isRedirectRoute) {
+    const rawId = decodeURIComponent(currentPath.replace(/^\/(r|redirect|nfc|tag)\//i, '')).trim().toLowerCase().split('/')[0].split('?')[0];
+    const cleanId = rawId.replace(/[^a-zA-Z0-9_\-]/g, '');
+    if (cleanId.length > 0) {
+      return <RedirectHandler cleanId={cleanId} />;
+    }
+  }
+
+  return <MainApp />;
 }

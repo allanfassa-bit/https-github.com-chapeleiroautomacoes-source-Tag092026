@@ -1,1 +1,152 @@
 @import "tailwindcss";
+
+html, body {
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
+}
+
+#root {
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: hidden;
+  min-height: 100vh;
+}
+
+/* ========================================================================== */
+/* Regras de Estilo para .print-container: Design Premium & Profundidade Real */
+/* ========================================================================== */
+.print-container {
+  position: relative;
+  letter-spacing: -0.02em;
+  line-height: 1.35;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* Box-shadow suave simulando profundidade física e relevo de placa premium (acrílico/PVC/metal) */
+  box-shadow:
+    0 1px 3px 0 rgba(0, 0, 0, 0.08),
+    0 10px 28px -4px rgba(0, 0, 0, 0.18),
+    0 24px 60px -12px rgba(0, 0, 0, 0.28),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.14),
+    inset 0 1px 2px 0 rgba(255, 255, 255, 0.28);
+  border-radius: inherit;
+  transition: box-shadow 0.25s ease, transform 0.25s ease;
+}
+
+/* Tipografia de Alta Precisão (Senior Designer: -0.02em letter-spacing) */
+.print-container,
+.print-container p,
+.print-container span,
+.print-container label,
+.print-container button {
+  letter-spacing: -0.02em;
+}
+
+/* Espaçamento e Hierarquia Vertical: Evita colisão entre Nome da Empresa e Estrelas */
+.print-container .company-name,
+.print-container .business-name,
+.print-container .lead-name,
+.print-container [data-element="company-name"],
+.print-container h1,
+.print-container h2,
+.print-container h3 {
+  letter-spacing: -0.025em;
+  line-height: 1.24;
+  margin-top: 0.25rem;
+  margin-bottom: 0.35rem;
+  word-break: break-word;
+}
+
+.print-container .stars-row,
+.print-container .rating-stars,
+.print-container .stars-container,
+.print-container [data-element="stars"],
+.print-container [data-stars="true"] {
+  line-height: 1;
+  margin-bottom: 0.45rem;
+  padding-bottom: 0.1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Subtítulos e slogans institucionais */
+.print-container .subtitle,
+.print-container .cta-subtext {
+  letter-spacing: -0.018em;
+  line-height: 1.32;
+  margin-top: 0.25rem;
+}
+
+@media print {
+  .print-container {
+    box-shadow: none !important;
+  }
+}
+
+.print-container .smartphone-nfc-container,
+.print-container .nfc-phone-slot {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 58px;
+  height: 58px;
+  margin: 0 auto;
+  border-radius: 14px;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.print-container .smartphone-nfc-icon,
+.print-container .nfc-smartphone-centered {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+.print-container .smartphone-nfc-icon svg,
+.print-container svg.smartphone-nfc {
+  display: block;
+  margin: auto;
+  width: 52px;
+  height: 42px;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  transform-origin: center center;
+}
+
+/* ========================================================================== */
+/* Regras para o seletor 'header': Margens e Safe-Area no Mobile              */
+/* Prevenção rigorosa de overflow e rolagem lateral indesejada                */
+/* ========================================================================== */
+header {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: clip;
+  margin-left: 0;
+  margin-right: 0;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
+@supports (padding-top: max(0px)) {
+  header {
+    padding-top: max(0px, env(safe-area-inset-top, 0px));
+    padding-left: max(0px, env(safe-area-inset-left, 0px));
+    padding-right: max(0px, env(safe-area-inset-right, 0px));
+  }
+}
+

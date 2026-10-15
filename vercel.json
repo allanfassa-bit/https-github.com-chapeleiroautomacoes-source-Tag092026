@@ -1,0 +1,87 @@
+{
+  "version": 2,
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api"
+    },
+    {
+      "source": "/r/(.*)",
+      "destination": "/api"
+    },
+    {
+      "source": "/redirect/(.*)",
+      "destination": "/api"
+    },
+    {
+      "source": "/qr/(.*)",
+      "destination": "/api"
+    },
+    {
+      "source": "/p/(.*)",
+      "destination": "/api"
+    },
+    {
+      "source": "/nfc/(.*)",
+      "destination": "/api"
+    },
+    {
+      "source": "/tag/(.*)",
+      "destination": "/api"
+    },
+    {
+      "source": "/l/(.*)",
+      "destination": "/api"
+    },
+    {
+      "source": "/health",
+      "destination": "/api"
+    },
+    {
+      "source": "/cardapio/(.*)",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/c/(.*)",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/menu/(.*)",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/minisite/(.*)",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/m/(.*)",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/r/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0"
+        }
+      ]
+    },
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0"
+        }
+      ]
+    }
+  ]
+}
