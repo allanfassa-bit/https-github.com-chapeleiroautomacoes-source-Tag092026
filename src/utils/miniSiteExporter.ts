@@ -38,6 +38,247 @@ export interface MiniSiteConfig {
   openingHours?: string;
   rating?: number;
   reviewCount?: number;
+  marqueeText?: string;
+  services?: Array<{
+    id?: string;
+    title: string;
+    description?: string;
+    price?: string;
+    imageUrl?: string;
+    customWhatsappMsg?: string;
+  }>;
+}
+
+export function getDefaultFourProducts(niche: string = '', companyName: string = 'Sua Empresa'): Array<{
+  id: string;
+  title: string;
+  description: string;
+  price: string;
+  imageUrl: string;
+  customWhatsappMsg?: string;
+}> {
+  const n = (niche || '').toLowerCase();
+  
+  if (n.includes('moda') || n.includes('roupa') || n.includes('vestu') || n.includes('loja') || n.includes('calc') || n.includes('acessorio') || n.includes('infantil') || n.includes('feminina')) {
+    return [
+      {
+        id: 'p1',
+        title: 'Moda Infantil',
+        description: 'Looks confortáveis, alegres e estilosos para os pequenos.',
+        price: 'Novidades',
+        imageUrl: 'https://images.unsplash.com/photo-1518831959646-742c3a14ebf7?auto=format&fit=crop&w=600&q=80',
+        customWhatsappMsg: `Olá! Vi no Mini Site da ${companyName} os lançamentos de Moda Infantil e quero ver fotos e tamanhos!`
+      },
+      {
+        id: 'p2',
+        title: 'Moda Modesta & Casual',
+        description: 'Vestidos, saias e conjuntos elegantes para todas as ocasiões.',
+        price: 'Destaque VIP',
+        imageUrl: 'https://images.unsplash.com/photo-1496747611176-843222e1e57c?auto=format&fit=crop&w=600&q=80',
+        customWhatsappMsg: `Olá! Gostei muito das peças de Moda Modesta/Casual no Mini Site da ${companyName}. Como posso fazer o pedido?`
+      },
+      {
+        id: 'p3',
+        title: 'Calçados & Acessórios',
+        description: 'Bolsas, calçados e complementos que valorizam o seu estilo.',
+        price: 'Tendência',
+        imageUrl: 'https://images.unsplash.com/photo-1543163521-1bf539c55dd2?auto=format&fit=crop&w=600&q=80',
+        customWhatsappMsg: `Olá! Vim pelo Mini Site da ${companyName} e gostaria de conhecer as opções de calçados e acessórios!`
+      },
+      {
+        id: 'p4',
+        title: 'Cama, Mesa & Banho',
+        description: 'Conforto, beleza e durabilidade para renovar o seu lar.',
+        price: 'Exclusivo',
+        imageUrl: 'https://images.unsplash.com/photo-1522771739844-6a9f6d5f14af?auto=format&fit=crop&w=600&q=80',
+        customWhatsappMsg: `Olá! Vi os itens de Cama, Mesa e Banho no Mini Site da ${companyName}. Quais são as cores e modelos disponíveis?`
+      }
+    ];
+  }
+  
+  if (n.includes('restaur') || n.includes('pizz') || n.includes('hamburg') || n.includes('bar') || n.includes('lanche') || n.includes('caf') || n.includes('gastronom')) {
+    return [
+      {
+        id: 'p1',
+        title: 'Prato Especial da Casa',
+        description: 'Receita artesanal exclusiva com ingredientes frescos e selecionados.',
+        price: 'Mais Pedido',
+        imageUrl: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=600&q=80',
+        customWhatsappMsg: `Olá! Vi o Prato Especial no Mini Site de ${companyName} e gostaria de fazer um pedido!`
+      },
+      {
+        id: 'p2',
+        title: 'Combo Família / VIP',
+        description: 'Porção farta para compartilhar com acompanhamentos e bebida gelada.',
+        price: 'Combo do Dia',
+        imageUrl: 'https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=600&q=80',
+        customWhatsappMsg: `Olá! Gostaria de pedir o Combo Família anunciado no Mini Site da ${companyName}!`
+      },
+      {
+        id: 'p3',
+        title: 'Porções & Petiscos',
+        description: 'Crocância e sabor perfeitos para momentos inesquecíveis.',
+        price: 'Favorito',
+        imageUrl: 'https://images.unsplash.com/photo-1541592106381-b31e9677c0e5?auto=format&fit=crop&w=600&q=80',
+        customWhatsappMsg: `Olá! Quais porções e petiscos estão disponíveis hoje na ${companyName}?`
+      },
+      {
+        id: 'p4',
+        title: 'Sobremesas Artesanais',
+        description: 'Doces artesanais irresistíveis para fechar com chave de ouro.',
+        price: 'Sob Consulta',
+        imageUrl: 'https://images.unsplash.com/photo-1551024709-8f23befc6f87?auto=format&fit=crop&w=600&q=80',
+        customWhatsappMsg: `Olá! Gostaria de saber as opções de sobremesas disponíveis na ${companyName}!`
+      }
+    ];
+  }
+
+  if (n.includes('estét') || n.includes('beleza') || n.includes('salão') || n.includes('barbear') || n.includes('cabel') || n.includes('unha') || n.includes('spa')) {
+    return [
+      {
+        id: 'p1',
+        title: 'Procedimentos & Glow Facial',
+        description: 'Limpeza profunda, hidratação celular e cuidados personalizados.',
+        price: 'Procedimento VIP',
+        imageUrl: 'https://images.unsplash.com/photo-1570172619644-dfd03ed5d881?auto=format&fit=crop&w=600&q=80',
+        customWhatsappMsg: `Olá! Vi no Mini Site o Glow Facial da ${companyName} e quero agendar meu horário!`
+      },
+      {
+        id: 'p2',
+        title: 'Corte & Visagismo Exclusivo',
+        description: 'Harmonização de corte e acabamento impecável com hora marcada.',
+        price: 'Agendar',
+        imageUrl: 'https://images.unsplash.com/photo-1560066984-138dadb4c035?auto=format&fit=crop&w=600&q=80',
+        customWhatsappMsg: `Olá! Gostaria de agendar um horário para Corte & Visagismo na ${companyName}!`
+      },
+      {
+        id: 'p3',
+        title: 'Massagens Relaxantes & SPA',
+        description: 'Alívio do estresse, relaxamento muscular e bem-estar profundo.',
+        price: 'Experiência SPA',
+        imageUrl: 'https://images.unsplash.com/photo-1544161515-4ab6ce6db874?auto=format&fit=crop&w=600&q=80',
+        customWhatsappMsg: `Olá! Gostaria de agendar uma sessão de massagem/SPA na ${companyName}!`
+      },
+      {
+        id: 'p4',
+        title: 'Combo Beleza Completa',
+        description: 'Pacote integrado para transformar seu visual com máxima elegância.',
+        price: 'Condição Especial',
+        imageUrl: 'https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?auto=format&fit=crop&w=600&q=80',
+        customWhatsappMsg: `Olá! Vim pelo Mini Site e quero saber mais sobre o Combo Beleza da ${companyName}!`
+      }
+    ];
+  }
+
+  if (n.includes('mecan') || n.includes('oficina') || n.includes('auto') || n.includes('car') || n.includes('moto') || n.includes('pneu')) {
+    return [
+      {
+        id: 'p1',
+        title: 'Revisão Preventiva & Óleo',
+        description: 'Checklist de 30 itens de segurança e troca de óleo homologado.',
+        price: 'Checklist VIP',
+        imageUrl: 'https://images.unsplash.com/photo-1486006920555-c77dce18193b?auto=format&fit=crop&w=600&q=80',
+        customWhatsappMsg: `Olá! Vi no Mini Site da ${companyName} a Revisão Preventiva e quero agendar para meu veículo!`
+      },
+      {
+        id: 'p2',
+        title: 'Freios, Suspensão & Pneus',
+        description: 'Troca de pastilhas, amortecedores e alinhamento computadorizado.',
+        price: 'Segurança Máxima',
+        imageUrl: 'https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&w=600&q=80',
+        customWhatsappMsg: `Olá! Gostaria de fazer um orçamento de freios e suspensão na ${companyName}!`
+      },
+      {
+        id: 'p3',
+        title: 'Scanner & Injeção Eletrônica',
+        description: 'Diagnóstico computadorizado de ponta para identificar falhas com exatidão.',
+        price: 'Diagnóstico 3D',
+        imageUrl: 'https://images.unsplash.com/photo-1487754180451-c456f719a1fc?auto=format&fit=crop&w=600&q=80',
+        customWhatsappMsg: `Olá! Meu carro está com a luz de injeção acesa. Posso levar para passar o scanner na ${companyName}?`
+      },
+      {
+        id: 'p4',
+        title: 'Ar Condicionado & Higienização',
+        description: 'Eliminação de bactérias, troca de filtro e recarga de gás.',
+        price: 'Ar Puro',
+        imageUrl: 'https://images.unsplash.com/photo-1619642751034-765dfdf7c58e?auto=format&fit=crop&w=600&q=80',
+        customWhatsappMsg: `Olá! Gostaria de fazer a higienização do ar condicionado na ${companyName}!`
+      }
+    ];
+  }
+
+  if (n.includes('dent') || n.includes('odont') || n.includes('clinic') || n.includes('saude') || n.includes('médic')) {
+    return [
+      {
+        id: 'p1',
+        title: 'Avaliação & Check-up Digital',
+        description: 'Diagnóstico preventivo com câmera intraoral e tecnologia moderna.',
+        price: 'Agendar',
+        imageUrl: 'https://images.unsplash.com/photo-1588776814546-1ffcf47267a5?auto=format&fit=crop&w=600&q=80',
+        customWhatsappMsg: `Olá! Vi no Mini Site da ${companyName} e gostaria de agendar uma avaliação odontológica!`
+      },
+      {
+        id: 'p2',
+        title: 'Clareamento Dental a Laser',
+        description: 'Dentes brancos e sorriso iluminado com máxima segurança e conforto.',
+        price: 'Sorriso VIP',
+        imageUrl: 'https://images.unsplash.com/photo-1606811841689-23dfddce3e95?auto=format&fit=crop&w=600&q=80',
+        customWhatsappMsg: `Olá! Gostaria de saber como funciona o clareamento dental na ${companyName}!`
+      },
+      {
+        id: 'p3',
+        title: 'Alinhadores Invisíveis & Aparelho',
+        description: 'Alinhamento dentário estético, discreto e de rápida adaptação.',
+        price: 'Tecnologia 3D',
+        imageUrl: 'https://images.unsplash.com/photo-1598256989800-fe5f95da9787?auto=format&fit=crop&w=600&q=80',
+        customWhatsappMsg: `Olá! Gostaria de saber sobre os alinhadores invisíveis na ${companyName}!`
+      },
+      {
+        id: 'p4',
+        title: 'Implantes & Próteses Fixas',
+        description: 'Recupere sua mastigação e confiança com especialistas renomados.',
+        price: 'Condição Especial',
+        imageUrl: 'https://images.unsplash.com/photo-1629909613654-28e377c37b09?auto=format&fit=crop&w=600&q=80',
+        customWhatsappMsg: `Olá! Gostaria de informações sobre implantes dentários na ${companyName}!`
+      }
+    ];
+  }
+
+  // Padrão Geral / Comércio / Serviços
+  return [
+    {
+      id: 'p1',
+      title: 'Atendimento Personalizado VIP',
+      description: 'Consultoria e atendimento ágil diretamente pelo WhatsApp.',
+      price: '1-Clique',
+      imageUrl: 'https://images.unsplash.com/photo-1556742049-0a67e55722c6?auto=format&fit=crop&w=600&q=80',
+      customWhatsappMsg: `Olá! Vim pelo Mini Site de ${companyName} e gostaria de atendimento!`
+    },
+    {
+      id: 'p2',
+      title: 'Produtos & Soluções Mais Pedidas',
+      description: 'Nossa linha de maior destaque e satisfação comprovada por clientes.',
+      price: 'Mais Vendido',
+      imageUrl: 'https://images.unsplash.com/photo-1472851294608-062f824d29cc?auto=format&fit=crop&w=600&q=80',
+      customWhatsappMsg: `Olá! Gostaria de conhecer os produtos mais pedidos de ${companyName}!`
+    },
+    {
+      id: 'p3',
+      title: 'Condição & Pacote Promocional',
+      description: 'Ofertas exclusivas para quem entra em contato pelo Mini Site.',
+      price: 'Condição Especial',
+      imageUrl: 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&w=600&q=80',
+      customWhatsappMsg: `Olá! Vi o pacote promocional no Mini Site da ${companyName} e quero aproveitar!`
+    },
+    {
+      id: 'p4',
+      title: 'Orçamento Rápido e Sem Burocracia',
+      description: 'Envie sua dúvida ou pedido e receba retorno em minutos.',
+      price: 'Orçamento Grátis',
+      imageUrl: 'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?auto=format&fit=crop&w=600&q=80',
+      customWhatsappMsg: `Olá! Gostaria de solicitar um orçamento rápido na ${companyName}!`
+    }
+  ];
 }
 
 export function formatMiniSitePhone(phone: string = ''): string {
@@ -152,6 +393,20 @@ export function generateMiniSiteHtml(config: MiniSiteConfig, qrOverrides?: QrCod
   }
 
   const exportDate = new Date().toLocaleDateString('pt-BR');
+
+  // Dynamic Marquee Banner
+  const marqueeText = config.marqueeText || '🔥 NOVIDADES TODA SEMANA • VISITE NOSSA LOJA • ATENDIMENTO VIP • COMPRE PELO WHATSAPP • QUALIDADE GARANTIDA 🔥';
+
+  // 4 Main Featured Products (Model inspired by photo: 2x2 grid with photo & WhatsApp CTA)
+  const userServices = Array.isArray(config.services) ? config.services : [];
+  const defaultServices = getDefaultFourProducts(niche, name);
+  const featuredProducts = userServices.length >= 4
+    ? userServices.slice(0, 4)
+    : [
+        ...userServices,
+        ...defaultServices.slice(userServices.length, 4)
+      ];
+  const additionalServices = userServices.length > 4 ? userServices.slice(4) : [];
 
   return `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -720,6 +975,238 @@ export function generateMiniSiteHtml(config: MiniSiteConfig, qrOverrides?: QrCod
       border: 1px solid rgba(255, 255, 255, 0.08);
       color: #94a3b8;
     }
+
+    /* Golden Marquee Ticker Banner */
+    .marquee-wrapper {
+      width: 100%;
+      overflow: hidden;
+      background: linear-gradient(90deg, #f59e0b 0%, #d97706 50%, #f59e0b 100%);
+      color: #0f172a;
+      padding: 8px 0;
+      border-radius: 16px;
+      font-weight: 800;
+      font-size: 11px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      box-shadow: 0 4px 15px rgba(245, 158, 11, 0.3);
+      white-space: nowrap;
+      position: relative;
+    }
+    .marquee-content {
+      display: inline-block;
+      white-space: nowrap;
+      animation: marqueeScroll 18s linear infinite;
+    }
+    @keyframes marqueeScroll {
+      0% { transform: translateX(0%); }
+      100% { transform: translateX(-50%); }
+    }
+
+    /* 4 Featured Products 2x2 Grid (Based on Bio Site Model) */
+    .products-section {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 2px;
+    }
+    .products-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 4px;
+    }
+    .products-title {
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: -0.01em;
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .products-badge {
+      font-size: 10px;
+      font-weight: 800;
+      color: #38bdf8;
+      background: rgba(56, 189, 248, 0.15);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      padding: 2px 8px;
+      border-radius: 12px;
+    }
+    .products-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+    .product-card {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 20px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      transition: all 0.25s ease;
+      box-shadow: 0 8px 20px -8px rgba(0,0,0,0.4);
+    }
+    .product-card:hover {
+      transform: translateY(-3px);
+      border-color: rgba(37, 211, 102, 0.5);
+      box-shadow: 0 12px 25px -8px rgba(37, 211, 102, 0.25);
+    }
+    .product-img-wrapper {
+      position: relative;
+      width: 100%;
+      height: 110px;
+      overflow: hidden;
+      background: #1e293b;
+    }
+    .product-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transition: transform 0.4s ease;
+    }
+    .product-card:hover .product-img {
+      transform: scale(1.06);
+    }
+    .product-tag {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      color: #34d399;
+      font-size: 9px;
+      font-weight: 800;
+      padding: 2px 7px;
+      border-radius: 8px;
+      border: 1px solid rgba(52, 211, 153, 0.3);
+    }
+    .product-body {
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .product-name {
+      font-size: 13px;
+      font-weight: 800;
+      color: #ffffff;
+      line-height: 1.25;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .product-desc {
+      font-size: 10px;
+      color: #94a3b8;
+      line-height: 1.3;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .product-whatsapp-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      background: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
+      color: #ffffff;
+      font-size: 11px;
+      font-weight: 800;
+      padding: 8px 8px;
+      border-radius: 12px;
+      text-decoration: none;
+      box-shadow: 0 4px 12px rgba(37, 211, 102, 0.3);
+      transition: all 0.2s ease;
+    }
+    .product-whatsapp-btn:hover {
+      filter: brightness(1.1);
+      transform: scale(1.02);
+    }
+
+    /* Google Reviews Featured Block */
+    .google-card {
+      background: linear-gradient(135deg, rgba(66, 133, 244, 0.12) 0%, rgba(251, 188, 4, 0.12) 100%);
+      border: 1.5px solid rgba(251, 188, 4, 0.4);
+      border-radius: 24px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      box-shadow: 0 10px 25px -8px rgba(251, 188, 4, 0.25);
+    }
+    .google-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .google-stars {
+      color: #fbbf24;
+      font-size: 15px;
+      letter-spacing: 2px;
+    }
+    .google-score-badge {
+      font-size: 11px;
+      font-weight: 800;
+      padding: 3px 8px;
+      border-radius: 10px;
+      background: rgba(251, 188, 4, 0.2);
+      color: #fef08a;
+      border: 1px solid rgba(251, 188, 4, 0.35);
+    }
+    .google-card-title {
+      font-size: 14px;
+      font-weight: 800;
+      color: #ffffff;
+    }
+    .google-card-sub {
+      font-size: 11px;
+      color: #cbd5e1;
+      line-height: 1.35;
+    }
+    .google-cta-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: linear-gradient(135deg, #4285F4 0%, #34A853 100%);
+      color: #ffffff;
+      font-size: 12px;
+      font-weight: 800;
+      padding: 11px 16px;
+      border-radius: 14px;
+      text-decoration: none;
+      box-shadow: 0 6px 18px rgba(66, 133, 244, 0.35);
+      transition: all 0.2s ease;
+    }
+    .google-cta-btn:hover {
+      filter: brightness(1.08);
+      transform: translateY(-1px);
+    }
+
+    /* Pix Featured Block */
+    .pix-card {
+      background: linear-gradient(135deg, rgba(50, 188, 173, 0.12) 0%, rgba(16, 185, 129, 0.08) 100%);
+      border: 1.5px solid rgba(50, 188, 173, 0.35);
+      border-radius: 22px;
+      padding: 15px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      box-shadow: 0 10px 25px -8px rgba(50, 188, 173, 0.2);
+    }
   </style>
 </head>
 <body>
@@ -729,7 +1216,7 @@ export function generateMiniSiteHtml(config: MiniSiteConfig, qrOverrides?: QrCod
 
   <main class="container">
     
-    <!-- Profile Card -->
+    <!-- 1. Profile Header Card -->
     <header class="profile-card">
       <div class="avatar-wrapper">
         <div class="avatar">
@@ -759,52 +1246,110 @@ export function generateMiniSiteHtml(config: MiniSiteConfig, qrOverrides?: QrCod
       </div>
     </header>
 
-    <!-- Action Buttons -->
+    <!-- 2. Faixa Dourada Rolante (Marquee Ribbon Banner) -->
+    <div class="marquee-wrapper">
+      <div class="marquee-content">
+        <span>${marqueeText} &nbsp;&nbsp;&nbsp;&nbsp; ${marqueeText}</span>
+      </div>
+    </div>
+
+    <!-- 3. 4 Produtos Principais (Grade 2x2 com Chamar no WhatsApp) -->
+    <section class="products-section">
+      <div class="products-header">
+        <div class="products-title">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+          <span>4 Principais Destaques</span>
+        </div>
+        <span class="products-badge">Catálogo 1-Clique</span>
+      </div>
+      <div class="products-grid">
+        ${featuredProducts.map((p) => {
+          const pWaMsg = p.customWhatsappMsg || `Olá! Vi no Mini Site de ${name} o destaque "${p.title}"${p.price ? ` (${p.price})` : ''} e gostaria de mais informações!`;
+          const pWaUrl = buildMiniSiteWhatsappUrl(config.whatsappNumber || config.phone || '5511999999999', pWaMsg);
+          return `
+          <div class="product-card">
+            <div class="product-img-wrapper">
+              <img src="${p.imageUrl || 'https://images.unsplash.com/photo-1556742049-0a67e55722c6?auto=format&fit=crop&w=600&q=80'}" alt="${p.title}" class="product-img" loading="lazy" onerror="this.src='https://images.unsplash.com/photo-1556742049-0a67e55722c6?auto=format&fit=crop&w=600&q=80'">
+              <span class="product-tag">${p.price || 'Destaque'}</span>
+            </div>
+            <div class="product-body">
+              <div>
+                <h4 class="product-name">${p.title}</h4>
+                ${p.description ? `<p class="product-desc">${p.description}</p>` : ''}
+              </div>
+              <a href="${pWaUrl}" target="_blank" rel="noopener noreferrer" class="product-whatsapp-btn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981z"/>
+                </svg>
+                <span>Chamar no WhatsApp</span>
+              </a>
+            </div>
+          </div>
+          `;
+        }).join('')}
+      </div>
+    </section>
+
+    <!-- 4. Card Avaliação no Google (Google Reviews) -->
+    <div class="google-card">
+      <div class="google-card-header">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="width:34px;height:34px;border-radius:10px;background:#ffffff;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.18);">
+            <svg width="20" height="20" viewBox="0 0 24 24">
+              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+            </svg>
+          </div>
+          <div>
+            <div class="google-card-title">Avaliação no Google</div>
+            <div class="google-stars">★★★★★</div>
+          </div>
+        </div>
+        <span class="google-score-badge">5.0 no Google</span>
+      </div>
+      <p class="google-card-sub">Sua opinião é fundamental para nossa empresa! Avalie nosso atendimento no Google em menos de 5 segundos.</p>
+      <a href="${reviewUrl}" target="_blank" rel="noopener noreferrer" class="google-cta-btn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+        <span>Deixar Avaliação no Google (1-Clique)</span>
+      </a>
+    </div>
+
+    <!-- 5. Card Pagamento PIX (Copia & Cola + QR Code) -->
+    <div class="pix-card">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="width:36px;height:36px;border-radius:10px;background:#32BCAD;display:flex;align-items:center;justify-content:center;color:white;box-shadow:0 3px 8px rgba(50,188,173,0.3);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M14.654 6.786l-2.654 2.654-2.654-2.654 2.654-2.654 2.654 2.654zm-2.654 7.786l2.654-2.654 2.654 2.654-2.654 2.654-2.654-2.654zm7.786-2.654l2.654-2.654-2.654-2.654-2.654 2.654 2.654 2.654zm-15.572 0l-2.654-2.654 2.654-2.654 2.654 2.654-2.654 2.654z"/></svg>
+          </div>
+          <div>
+            <div style="font-size:13px;font-weight:800;color:white;">Pagamento via Pix</div>
+            <div style="font-size:10px;color:#94a3b8;">Favorecido: ${pixBeneficiary}</div>
+          </div>
+        </div>
+        <span style="font-size:10px;font-weight:800;padding:2px 8px;border-radius:10px;background:rgba(50,188,173,0.2);color:#5eead4;">1-Toque</span>
+      </div>
+      <div style="background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;gap:8px;">
+        <span style="font-family:monospace;font-size:11px;color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${pixKey}</span>
+        <span style="font-size:9px;color:#94a3b8;font-weight:700;text-transform:uppercase;">${pixType}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <button type="button" onclick="handlePixClick()" style="padding:9px 12px;border-radius:12px;background:#32BCAD;color:#042f2e;font-weight:800;font-size:11px;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+          <span id="pixBtnText">Copiar Chave</span>
+        </button>
+        <button type="button" onclick="openPixModalOnly()" style="padding:9px 12px;border-radius:12px;background:rgba(255,255,255,0.08);color:white;font-weight:700;font-size:11px;border:1px solid rgba(255,255,255,0.15);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/></svg>
+          <span>Ver QR Code</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 6. Outros Links & Canais Oficiais -->
     <div class="buttons-group">
 
-      <!-- 1. GOOGLE REVIEW (Avaliação 5 Estrelas) -->
-      <a href="${reviewUrl}" target="_blank" rel="noopener noreferrer" class="action-btn btn-google">
-        <div class="btn-left">
-          <div class="btn-icon">
-            <svg viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
-            </svg>
-          </div>
-          <div class="btn-info">
-            <div class="btn-title">
-              <span>Avaliar no Google</span>
-              <span class="btn-badge" style="background:#fef08a;color:#854d0e;">⭐⭐⭐⭐⭐</span>
-            </div>
-            <div class="btn-subtitle">Avalie nosso atendimento em 5 segundos</div>
-          </div>
-        </div>
-        <div class="btn-arrow">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
-        </div>
-      </a>
-
-      <!-- 2. WHATSAPP DIRETO -->
-      <a href="${whatsappUrl}" target="_blank" rel="noopener noreferrer" class="action-btn btn-whatsapp">
-        <div class="btn-left">
-          <div class="btn-icon">
-            <svg viewBox="0 0 24 24" fill="currentColor">
-              <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981z"/>
-            </svg>
-          </div>
-          <div class="btn-info">
-            <div class="btn-title">
-              <span>WhatsApp Direto</span>
-              <span class="btn-badge" style="background:#dcfce7;color:#166534;">1-Clique</span>
-            </div>
-            <div class="btn-subtitle">Fale com nossa equipe agora mesmo</div>
-          </div>
-        </div>
-        <div class="btn-arrow">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
-        </div>
-      </a>
-
-      <!-- 3. WI-FI COM 1 CLIQUE -->
+      <!-- Wi-Fi 1-Clique -->
       <button type="button" onclick="openWifiModal()" class="action-btn btn-wifi">
         <div class="btn-left">
           <div class="btn-icon">
@@ -828,28 +1373,28 @@ export function generateMiniSiteHtml(config: MiniSiteConfig, qrOverrides?: QrCod
         </div>
       </button>
 
-      <!-- 4. PIX (1-CLIQUE COPIA & QR CODE) -->
-      <button type="button" onclick="handlePixClick()" class="action-btn btn-pix">
+      <!-- WhatsApp Geral / Atendimento -->
+      <a href="${whatsappUrl}" target="_blank" rel="noopener noreferrer" class="action-btn btn-whatsapp">
         <div class="btn-left">
           <div class="btn-icon">
             <svg viewBox="0 0 24 24" fill="currentColor">
-              <path d="M14.654 6.786l-2.654 2.654-2.654-2.654 2.654-2.654 2.654 2.654zm-2.654 7.786l2.654-2.654 2.654 2.654-2.654 2.654-2.654-2.654zm7.786-2.654l2.654-2.654-2.654-2.654-2.654 2.654 2.654 2.654zm-15.572 0l-2.654-2.654 2.654-2.654 2.654 2.654-2.654 2.654z"/>
+              <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981z"/>
             </svg>
           </div>
           <div class="btn-info">
             <div class="btn-title">
-              <span>Pagamento via Pix</span>
-              <span class="btn-badge" style="background:#ccfbf1;color:#115e59;">Copia &amp; Cola</span>
+              <span>WhatsApp Direto</span>
+              <span class="btn-badge" style="background:#dcfce7;color:#166534;">1-Clique</span>
             </div>
-            <div class="btn-subtitle">Copie a chave Pix com 1 toque ou veja o QR Code</div>
+            <div class="btn-subtitle">Fale com nossa equipe sobre outras dúvidas</div>
           </div>
         </div>
         <div class="btn-arrow">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
         </div>
-      </button>
+      </a>
 
-      <!-- 5. INSTAGRAM -->
+      <!-- Instagram Oficial -->
       <a href="${instaUrl}" target="_blank" rel="noopener noreferrer" class="action-btn btn-instagram">
         <div class="btn-left">
           <div class="btn-icon">
@@ -870,7 +1415,7 @@ export function generateMiniSiteHtml(config: MiniSiteConfig, qrOverrides?: QrCod
         </div>
       </a>
 
-      <!-- 6. ENDEREÇO & COMO CHEGAR (se cadastrado) -->
+      <!-- Endereço & Rota Maps -->
       ${addressText ? `
       <a href="${mapsSearchUrl}" target="_blank" rel="noopener noreferrer" class="action-btn btn-maps">
         <div class="btn-left">
@@ -894,7 +1439,7 @@ export function generateMiniSiteHtml(config: MiniSiteConfig, qrOverrides?: QrCod
       </a>
       ` : ''}
 
-      <!-- 7. LIGAR DIRETO (se cadastrado) -->
+      <!-- Ligar Direto -->
       ${phoneCallUrl ? `
       <a href="${phoneCallUrl}" class="action-btn btn-phone">
         <div class="btn-left">
@@ -917,7 +1462,7 @@ export function generateMiniSiteHtml(config: MiniSiteConfig, qrOverrides?: QrCod
       </a>
       ` : ''}
 
-      <!-- 8. SITE OFICIAL (se configurado) -->
+      <!-- Site Oficial -->
       ${siteUrl ? `
       <a href="${siteUrl}" target="_blank" rel="noopener noreferrer" class="action-btn btn-site">
         <div class="btn-left">
@@ -942,7 +1487,7 @@ export function generateMiniSiteHtml(config: MiniSiteConfig, qrOverrides?: QrCod
       </a>
       ` : ''}
 
-      <!-- 9. TELEGRAM (se configurado) -->
+      <!-- Telegram -->
       ${telegramUrl ? `
       <a href="${telegramUrl}" target="_blank" rel="noopener noreferrer" class="action-btn btn-telegram">
         <div class="btn-left">
@@ -962,7 +1507,7 @@ export function generateMiniSiteHtml(config: MiniSiteConfig, qrOverrides?: QrCod
       </a>
       ` : ''}
 
-      <!-- 10. TIKTOK (se configurado) -->
+      <!-- TikTok -->
       ${tiktokUrl ? `
       <a href="${tiktokUrl}" target="_blank" rel="noopener noreferrer" class="action-btn btn-tiktok">
         <div class="btn-left">
@@ -981,6 +1526,37 @@ export function generateMiniSiteHtml(config: MiniSiteConfig, qrOverrides?: QrCod
         </div>
       </a>
       ` : ''}
+
+    </div>
+
+    <!-- Catálogo Adicional de Serviços (se cadastrado mais de 4 itens) -->
+    ${additionalServices.length > 0 ? `
+    <div style="margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.1); text-align: left;">
+      <div style="font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: #38bdf8; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+        <span>✨ Mais Serviços &amp; Especialidades</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        ${additionalServices.map((srv) => {
+          const srvWaUrl = buildMiniSiteWhatsappUrl(
+            config.whatsappNumber || config.phone || '5511999999999',
+            `Olá! Vi no Mini Site de ${name} o serviço "${srv.title}"${srv.price ? ` (${srv.price})` : ''} e gostaria de mais informações!`
+          );
+          return `
+          <a href="${srvWaUrl}" target="_blank" rel="noopener noreferrer" style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-radius: 16px; background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(56, 189, 248, 0.25); text-decoration: none; color: white;">
+            <div style="min-width: 0; flex: 1;">
+              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <strong style="font-size: 13px; color: #ffffff;">${srv.title}</strong>
+                ${srv.price ? `<span style="font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 8px; background: rgba(16, 185, 129, 0.2); color: #34d399;">${srv.price}</span>` : ''}
+              </div>
+              ${srv.description ? `<p style="font-size: 11px; color: #94a3b8; margin: 3px 0 0 0; line-height: 1.35;">${srv.description}</p>` : ''}
+            </div>
+            <span style="font-size: 10px; font-weight: 800; padding: 6px 10px; border-radius: 10px; background: #10b981; color: #022c22; white-space: nowrap;">Pedir</span>
+          </a>
+          `;
+        }).join('')}
+      </div>
+    </div>
+    ` : ''}
 
     </div>
 
@@ -1089,6 +1665,10 @@ export function generateMiniSiteHtml(config: MiniSiteConfig, qrOverrides?: QrCod
     }
 
     function openPixModal() {
+      document.getElementById('pixModal').classList.add('active');
+    }
+
+    function openPixModalOnly() {
       document.getElementById('pixModal').classList.add('active');
     }
 

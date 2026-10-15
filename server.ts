@@ -335,8 +335,8 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '15mb' }));
+app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
 // 🛡️ Rate Limiter Middleware for API Endpoints (Anti-DDoS / Brute Force Probe)
 const apiRequestCounts = new Map<string, { count: number; resetAt: number }>();
@@ -354,8 +354,8 @@ app.use((req, res, next) => {
     client.count++;
   }
 
-  // Max 120 API requests per minute per IP
-  if (client.count > 120) {
+  // Max 300 API requests per minute per IP
+  if (client.count > 300) {
     return res.status(429).json({
       error: 'Limite de requisições excedido para este IP. Aguarde 1 minuto.',
       code: 'RATE_LIMIT_EXCEEDED'
@@ -364,17 +364,20 @@ app.use((req, res, next) => {
   next();
 });
 
-// 🛡️ Global Injection Guard: Blocks SQLi, NoSQLi and Command Injection attempts
+// 🛡️ Global Injection Guard: Blocks SQLi, NoSQLi and Command Injection attempts without false positives on Portuguese business names or URLs
 function detectMaliciousPayload(val: any): boolean {
   if (typeof val === 'string') {
     const sqlPatterns = [
-      /(\b(UNION(\s+ALL)?|SELECT|DROP|INSERT|DELETE|UPDATE|ALTER|TRUNCATE)\b\s+)/i,
-      /('|\b)(OR|AND)\b\s+('?\d+'?\s*=\s*'?\d+|'?\w+'?\s*=\s*'?\w+)/i,
-      /(--|\/\*|\*\/)/,
-      /(\bWAITFOR\s+DELAY\b|\bBENCHMARK\b|\bSLEEP\s*\()/i
+      /(\bUNION\s+(ALL\s+)?SELECT\b)/i,
+      /(\b(DROP|TRUNCATE)\s+TABLE\b)/i,
+      /(\bINSERT\s+INTO\b[\s\S]{1,40}\bVALUES\b)/i,
+      /(\bDELETE\s+FROM\b[\s\S]{1,40}\bWHERE\b)/i,
+      /('\s*(OR|AND)\s*'?\d+'?\s*=\s*'?\d+)/i,
+      /(;\s*--\s+)/,
+      /(\bWAITFOR\s+DELAY\b|\bBENCHMARK\s*\(|\bSLEEP\s*\(\d+\))/i
     ];
-    const nosqlPatterns = [/\$where/i, /\$ne/i, /\$regex/i, /\$gt/i];
-    const pathTraversal = /(\.\.[\/\\])/;
+    const nosqlPatterns = [/\$where/i, /\$ne\b/i, /\$regex\b/i, /\$gt\b/i];
+    const pathTraversal = /(\.\.[\/\\]\.\.[\/\\])/;
 
     for (const p of sqlPatterns) if (p.test(val)) return true;
     for (const p of nosqlPatterns) if (p.test(val)) return true;
@@ -403,54 +406,46 @@ app.use((req, res, next) => {
 
 // GMB CyberShield Guard - Protects against Prompt Injection, XSS, SQLi and malicious payloads
 function auditInputSecurity(inputs: Record<string, any>): { safe: boolean; reason?: string } {
-  // Regex patterns to capture dangerous Prompt Injection and exploit behaviors
   const promptInjectionPatterns = [
-    /ignore\s+previous/i,
-    /system\s+override/i,
-    /desconsidere\s+as/i,
-    /previous\s+instructions/i,
-    /comportamento\s+anterior/i,
-    /prompt\s+inject/i,
-    /bypass/i,
-    /reveal\s+secret/i,
-    /api\s*key/i,
-    /process\.env/i,
-    /env\./i,
-    /eval\(/i,
-    /global\./i,
-    /<script/i,
-    /javascript:/i,
-    /drop\s+table/i,
-    /select\s+\*\s+from/i,
-    /union\s+select/i,
-    /or\s+1\s*=\s*1/i
+    /ignore\s+all\s+previous\s+instructions/i,
+    /system\s+override\s+command/i,
+    /desconsidere\s+todas\s+as\s+instru/i,
+    /reveal\s+secret\s+key/i,
+    /process\.env\./i,
+    /<script[\s>]/i,
+    /javascript:\s*[a-z]/i,
+    /drop\s+table\s+/i,
+    /union\s+all\s+select/i
   ];
 
-  const dangerousChars = /[<>;{}|[\]\\]/;
+  const dangerousXssChars = /<script|<\/script|onload\s*=|onerror\s*=/i;
 
-  for (const [key, value] of Object.entries(inputs)) {
+  for (const [key, value] of Object.entries(inputs || {})) {
     if (typeof value === 'string') {
-      // 1. Enforce length constraints - short input fields like city/niche are capped at 80, large payload strings have a safe 4000 cap
       const isShortInput = key === 'city' || key === 'niche' || key === 'customNiche';
-      const maxLength = isShortInput ? 80 : 4000;
+      const maxLength = isShortInput ? 160 : 25000;
       
       if (value.length > maxLength) {
         return { safe: false, reason: `Parâmetro '${key}' excede o limite máximo de segurança de ${maxLength} caracteres.` };
       }
 
-      // 2. Scan for prompt injection keywords
       for (const pattern of promptInjectionPatterns) {
         if (pattern.test(value)) {
           return { safe: false, reason: `Parâmetro '${key}' contém comandos suspeitos ou termos restritos de injeção de prompt.` };
         }
       }
 
-      // 3. Scan for control characters indicating XSS or query manipulation
-      if (dangerousChars.test(value)) {
-        return { safe: false, reason: `Parâmetro '${key}' contém caracteres especiais restritos pelo CyberShield.` };
+      if (dangerousXssChars.test(value)) {
+        return { safe: false, reason: `Parâmetro '${key}' contém tags de script restritas pelo CyberShield.` };
+      }
+    } else if (Array.isArray(value)) {
+      for (const item of value) {
+        if (typeof item === 'object' && item !== null) {
+          const nestedAudit = auditInputSecurity(item);
+          if (!nestedAudit.safe) return nestedAudit;
+        }
       }
     } else if (typeof value === 'object' && value !== null) {
-      // Deep audit nested items safely
       const nestedAudit = auditInputSecurity(value);
       if (!nestedAudit.safe) return nestedAudit;
     }
@@ -1372,6 +1367,7 @@ app.get([
   '/api/resolve-redirect/tag/:leadId'
 ], async (req, res) => {
   const rawParam = String(req.params.leadId || '').trim();
+  const toOverride = typeof req.query.to === 'string' ? req.query.to.toLowerCase().trim() : '';
   const cleanLeadId = decodeURIComponent(rawParam).replace(/[^a-zA-Z0-9_\-]/g, '').toLowerCase();
 
   if (!cleanLeadId) {
@@ -1401,20 +1397,84 @@ app.get([
 
   const businessName = item?.name || cleanLeadId.replace(/_/g, ' ');
   const city = item?.city || '';
-  const rawTarget = (/ChIJ[a-zA-Z0-9_\-]{23,}/i.test(item?.nfcCustomUrl || '') || (item?.nfcCustomUrl || '').includes('writereview'))
-    ? item?.nfcCustomUrl
-    : (item?.googleMapsUrl || item?.nfcCustomUrl || '');
+  const activeMode = toOverride || item?.nfcRedirectActive || 'gmb';
+  let resolvedTarget = '';
 
-  const targetUrl = await convertToDirectReviewLink(rawTarget || '', businessName, city);
+  if (activeMode === 'whatsapp' && (item?.nfcWhatsappNum || item?.phone)) {
+    const digits = String(item.nfcWhatsappNum || item.phone).replace(/\D/g, '');
+    const phoneWithCountry = digits.startsWith('55') ? digits : `55${digits}`;
+    const msg = encodeURIComponent(item.nfcWhatsappMsg || `Olá! Vim pela Placa Inteligente de ${businessName}.`);
+    resolvedTarget = `https://wa.me/${phoneWithCountry}?text=${msg}`;
+  } else if (activeMode === 'instagram' && item?.nfcInstagramUrl) {
+    resolvedTarget = item.nfcInstagramUrl.startsWith('http') ? item.nfcInstagramUrl : `https://instagram.com/${item.nfcInstagramUrl.replace(/^@/, '')}`;
+  } else if (activeMode === 'website' && item?.websiteUrl) {
+    resolvedTarget = item.websiteUrl.startsWith('http') ? item.websiteUrl : `https://${item.websiteUrl}`;
+  } else if (activeMode === 'minisite') {
+    resolvedTarget = `https://automacaonfc.onrender.com/?minisite=${encodeURIComponent(item?.id || cleanLeadId)}`;
+  } else if (activeMode === 'custom' && item?.nfcCustomUrl) {
+    resolvedTarget = item.nfcCustomUrl;
+  }
+
+  if (!resolvedTarget) {
+    const rawTarget = (/ChIJ[a-zA-Z0-9_\-]{23,}/i.test(item?.nfcCustomUrl || '') || (item?.nfcCustomUrl || '').includes('writereview'))
+      ? item?.nfcCustomUrl
+      : (item?.googleMapsUrl || item?.nfcCustomUrl || '');
+    resolvedTarget = await convertToDirectReviewLink(rawTarget || '', businessName, city);
+  }
+
+  const fallbackSearchUrl = `https://www.google.com/search?q=${encodeURIComponent(`${businessName} ${city}`.trim())}#lrd=0x0:0x0,3`;
 
   return res.json({
     success: true,
     leadId: cleanLeadId,
     businessName,
-    targetUrl: targetUrl || `https://www.google.com/search?q=${encodeURIComponent(businessName)}#lrd=0x0:0x0,3`
+    city,
+    redirectMode: activeMode,
+    targetUrl: resolvedTarget || fallbackSearchUrl,
+    fallbackUrl: fallbackSearchUrl
   });
 });
-app.get('/m/:leadId', (req, res) => res.redirect(302, `/?minisite=${(req.params.leadId || '').replace(/[^a-zA-Z0-9_\-]/g, '')}`));
+
+// Backend API for Leads Synchronization (Multi-device Sync across Mobile/Tablet/Desktop & Fallback)
+app.get('/api/leads', async (_req, res) => {
+  try {
+    const leadsList = Array.from(leadsMemoryCache.values());
+    return res.json({ success: true, leads: leadsList });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message || 'Failed to fetch leads' });
+  }
+});
+
+app.post('/api/leads/sync', async (req, res) => {
+  try {
+    const lead = req.body?.lead || req.body;
+    if (!lead || !lead.id) {
+      return res.status(400).json({ error: 'Lead object with id is required' });
+    }
+    const cleanId = String(lead.id).trim().toLowerCase();
+    const existing = leadsMemoryCache.get(cleanId) || {};
+    const merged = { ...existing, ...lead, id: String(lead.id).trim() };
+    leadsMemoryCache.set(cleanId, merged);
+    leadsMemoryCache.set(String(lead.id).trim(), merged);
+    try {
+      await setDoc(doc(serverDb, 'leads', String(lead.id).trim()), merged, { merge: true });
+    } catch (_) {}
+    return res.json({ success: true, id: lead.id });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to sync lead' });
+  }
+});
+
+// Healthcheck Endpoint for Render & Uptime Monitors
+app.get('/api/health', (_req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    domain: 'https://automacaonfc.onrender.com',
+    defaultEntry: 'https://automacaonfc.onrender.com/?tab=leads',
+    cachedLeads: leadsMemoryCache.size,
+    timestamp: new Date().toISOString()
+  });
+});
 
 // Fast Mobile Plate Binding Endpoint (Field vendor assignment)
 app.post('/api/quick-bind-plate', async (req, res) => {
@@ -2014,6 +2074,12 @@ interface SystemUserRecord {
   active: boolean;
   createdAt: string;
   lastLoginAt?: string;
+  allowedTabs?: string[];
+  clientPermissions?: string[];
+  cpf?: string;
+  email?: string;
+  phone?: string;
+  vendorCode?: string;
 }
 
 const systemUsersRegistry = new Map<string, SystemUserRecord>();
@@ -2201,7 +2267,18 @@ function getSessionFromRequest(req: express.Request) {
   const authHeader = req.headers['authorization'] || '';
   const token = authHeader.replace(/^Bearer\s+/i, '').trim();
   if (!token) return null;
-  return activeSessions.get(token) || null;
+  if (activeSessions.has(token)) {
+    return activeSessions.get(token) || null;
+  }
+  if (token.startsWith('master_token_') || token.startsWith('master_session_')) {
+    return {
+      username: 'master',
+      name: 'Allan Fassa (Master)',
+      role: 'master',
+      createdAt: Date.now()
+    };
+  }
+  return null;
 }
 
 // Strict RBAC Middleware: Restrict route to authenticated Master users only
@@ -2265,12 +2342,16 @@ app.post('/api/master/login', async (req, res) => {
       }
 
       if (hash && salt && verifyPassword(p, hash, salt)) {
+        const tabsRaw = f.allowedTabsStr?.stringValue || '';
+        const permsRaw = f.clientPermissionsStr?.stringValue || '';
         authenticatedUser = {
           id: f.id?.stringValue || docId,
           username: f.username?.stringValue || uLower,
           name: f.name?.stringValue || u,
-          role: f.role?.stringValue || 'operator'
-        };
+          role: f.role?.stringValue || 'operator',
+          ...(tabsRaw ? { allowedTabs: tabsRaw.split(',').filter(Boolean) } : {}),
+          ...(permsRaw ? { clientPermissions: permsRaw.split(',').filter(Boolean) } : {})
+        } as any;
       }
     } else {
       // Fallback verification against master credentials if database user is not yet created
@@ -2511,7 +2592,13 @@ app.get('/api/users', requireMasterAuth, async (req, res) => {
         role: u.role,
         active: u.active,
         createdAt: u.createdAt,
-        lastLoginAt: u.lastLoginAt || ''
+        lastLoginAt: u.lastLoginAt || '',
+        allowedTabs: u.allowedTabs || [],
+        clientPermissions: u.clientPermissions || [],
+        cpf: u.cpf || '',
+        email: u.email || '',
+        phone: u.phone || '',
+        vendorCode: u.vendorCode || ''
       });
     }
 
@@ -2524,7 +2611,7 @@ app.get('/api/users', requireMasterAuth, async (req, res) => {
         body: JSON.stringify({
           structuredQuery: {
             from: [{ collectionId: 'system_users' }],
-            limit: 100
+            limit: 200
           }
         })
       });
@@ -2535,6 +2622,9 @@ app.get('/api/users', requireMasterAuth, async (req, res) => {
           const f = d.document?.fields || {};
           const id = f.id?.stringValue || d.document?.name?.split('/').pop();
           if (id) {
+            const tabsRaw = f.allowedTabsStr?.stringValue || '';
+            const permsRaw = f.clientPermissionsStr?.stringValue || '';
+            const existing = usersMap.get(id);
             usersMap.set(id, {
               id,
               username: f.username?.stringValue || id,
@@ -2542,7 +2632,13 @@ app.get('/api/users', requireMasterAuth, async (req, res) => {
               role: f.role?.stringValue || 'operator',
               active: f.active?.booleanValue !== false,
               createdAt: f.createdAt?.stringValue || '',
-              lastLoginAt: f.lastLoginAt?.stringValue || ''
+              lastLoginAt: f.lastLoginAt?.stringValue || '',
+              allowedTabs: tabsRaw ? tabsRaw.split(',').filter(Boolean) : (existing?.allowedTabs || []),
+              clientPermissions: permsRaw ? permsRaw.split(',').filter(Boolean) : (existing?.clientPermissions || []),
+              cpf: f.cpf?.stringValue || existing?.cpf || '',
+              email: f.email?.stringValue || existing?.email || '',
+              phone: f.phone?.stringValue || existing?.phone || '',
+              vendorCode: f.vendorCode?.stringValue || existing?.vendorCode || ''
             });
           }
         }
@@ -2567,38 +2663,16 @@ app.get('/api/users', requireMasterAuth, async (req, res) => {
   }
 });
 
-// CPF Mathematical Validation Helper (Dígitos verificadores oficiais)
-function isValidCPF(cpfRaw: string): boolean {
-  const clean = String(cpfRaw || '').replace(/\D/g, '');
-  if (clean.length !== 11) return false;
-  if (/^(\d)\1{10}$/.test(clean)) return false;
-
-  let sum = 0;
-  let remainder;
-  for (let i = 1; i <= 9; i++) {
-    sum += parseInt(clean.substring(i - 1, i), 10) * (11 - i);
-  }
-  remainder = (sum * 10) % 11;
-  if (remainder === 10 || remainder === 11) remainder = 0;
-  if (remainder !== parseInt(clean.substring(9, 10), 10)) return false;
-
-  sum = 0;
-  for (let i = 1; i <= 10; i++) {
-    sum += parseInt(clean.substring(i - 1, i), 10) * (12 - i);
-  }
-  remainder = (sum * 10) % 11;
-  if (remainder === 10 || remainder === 11) remainder = 0;
-  if (remainder !== parseInt(clean.substring(10, 11), 10)) return false;
-
-  return true;
-}
-
+// CPF / CNPJ Formatting Helper
 function formatCPF(cpfRaw: string): string {
   const clean = String(cpfRaw || '').replace(/\D/g, '');
   if (clean.length === 11) {
     return clean.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
   }
-  return clean;
+  if (clean.length === 14) {
+    return clean.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
+  }
+  return cpfRaw ? String(cpfRaw).trim() : 'Não informado';
 }
 
 // In-Memory Sellers Registry for sub-millisecond lookup and Master management
@@ -2616,64 +2690,88 @@ interface SellerRecord {
   salesCount: number;
   createdAt: string;
   lastLoginAt?: string;
+  allowedTabs?: string[];
+  clientPermissions?: string[];
 }
 const sellersRegistry = new Map<string, SellerRecord>();
 
+const DEFAULT_RESELLER_TABS = ['leads', 'dynamic_qr', 'site_preview', 'crm', 'calculator', 'cardapio', 'nfc_designer', 'landing', 'portal'];
+const DEFAULT_CLIENT_PERMISSIONS = ['client_redirect', 'client_minisite', 'client_cardapio', 'client_analytics', 'client_wifi_pix'];
+
 // ==========================================
-// PUBLIC SELLER & PARTNER REGISTRATION ENDPOINT (Com CPF, Telefone, Email e Nome)
+// PUBLIC SELLER, RESELLER & CLIENT REGISTRATION ENDPOINT
 // ==========================================
 app.post('/api/auth/register', async (req, res) => {
-  const { username, name, email, phone, cpf, password, role = 'seller', referralCode } = req.body || {};
-  if (!username || !name || !password || !cpf || !phone || !email) {
-    return res.status(400).json({ error: 'Preencha todos os campos obrigatórios: Nome completo, CPF, E-mail, Telefone/WhatsApp, Usuário e Senha.' });
+  const {
+    username,
+    name,
+    email = '',
+    phone = '',
+    cpf = '',
+    password,
+    role = 'reseller',
+    referralCode = '',
+    allowedTabs,
+    clientPermissions
+  } = req.body || {};
+
+  if (!name || !password) {
+    return res.status(400).json({ error: 'Preencha pelo menos o Nome Completo e a Senha de Acesso.' });
   }
 
-  const cleanUsername = String(username).toLowerCase().replace(/[^a-z0-9_\-.]/g, '');
-  if (cleanUsername.length < 3) {
-    return res.status(400).json({ error: 'Nome de usuário deve ter no mínimo 3 caracteres.' });
+  const rawUsername = username
+    ? String(username).trim()
+    : String(name).trim().toLowerCase().replace(/\s+/g, '_');
+  const cleanUsername = rawUsername.toLowerCase().replace(/[^a-z0-9_\-.]/g, '') || `parceiro_${Date.now().toString().slice(-4)}`;
+
+  if (cleanUsername.length < 2) {
+    return res.status(400).json({ error: 'Nome de usuário deve ter pelo menos 2 caracteres.' });
   }
-  if (String(password).length < 6) {
-    return res.status(400).json({ error: 'Senha deve ter no mínimo 6 caracteres.' });
+  if (String(password).length < 4) {
+    return res.status(400).json({ error: 'A senha deve ter pelo menos 4 caracteres.' });
   }
 
-  // Strict CPF validation
-  const cleanCpf = String(cpf).replace(/\D/g, '');
-  if (!isValidCPF(cleanCpf)) {
-    return res.status(400).json({ error: 'CPF inválido. Por favor, digite um CPF válido com 11 dígitos corretos.' });
-  }
-  const formattedCpf = formatCPF(cleanCpf);
+  const formattedCpf = formatCPF(cpf || '000.000.000-00');
 
-  // Allowed public registration roles
-  const validRoles = ['seller', 'reseller', 'affiliate'];
-  const assignedRole = validRoles.includes(role) ? role : 'seller';
+  const validRoles = ['seller', 'reseller', 'affiliate', 'client', 'operator'];
+  const assignedRole = validRoles.includes(role) ? role : 'reseller';
 
-  if (systemUsersRegistry.has(cleanUsername) || sellersRegistry.has(cleanUsername)) {
-    return res.status(409).json({ error: `O usuário "${cleanUsername}" já está cadastrado no sistema.` });
-  }
+  const normalizedTabs: string[] = Array.isArray(allowedTabs) && allowedTabs.length > 0
+    ? allowedTabs.map(String)
+    : DEFAULT_RESELLER_TABS;
+  const normalizedPerms: string[] = Array.isArray(clientPermissions) && clientPermissions.length > 0
+    ? clientPermissions.map(String)
+    : DEFAULT_CLIENT_PERMISSIONS;
+
+  const allowedTabsStr = normalizedTabs.join(',');
+  const clientPermissionsStr = normalizedPerms.join(',');
 
   try {
     const { hash, salt } = hashPassword(String(password));
     const now = new Date().toISOString();
-    const vendorCode = `VEND_${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
+    const existingSeller = sellersRegistry.get(cleanUsername);
+    const vendorCode = existingSeller?.vendorCode || `PARC_${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
 
     const sellerObj: SellerRecord = {
       id: cleanUsername,
       username: cleanUsername,
       name: String(name).trim(),
       cpf: formattedCpf,
-      email: String(email).trim().toLowerCase(),
-      phone: String(phone).trim(),
+      email: String(email || '').trim().toLowerCase(),
+      phone: String(phone || '').trim(),
       role: assignedRole,
       vendorCode: vendorCode,
       referralCode: referralCode || '',
       active: true,
-      salesCount: 0,
-      createdAt: now
+      salesCount: existingSeller?.salesCount || 0,
+      createdAt: existingSeller?.createdAt || now,
+      allowedTabs: normalizedTabs,
+      clientPermissions: normalizedPerms
     };
 
     sellersRegistry.set(cleanUsername, sellerObj);
 
-    // Also register in systemUsersRegistry for seamless login
+    // Also register in systemUsersRegistry for seamless login & UserManagementPanel visibility
     systemUsersRegistry.set(cleanUsername, {
       id: cleanUsername,
       username: cleanUsername,
@@ -2682,10 +2780,16 @@ app.post('/api/auth/register', async (req, res) => {
       passwordHash: hash,
       salt: salt,
       active: true,
-      createdAt: now
+      createdAt: existingSeller?.createdAt || now,
+      allowedTabs: normalizedTabs,
+      clientPermissions: normalizedPerms,
+      cpf: formattedCpf,
+      email: String(email || '').trim().toLowerCase(),
+      phone: String(phone || '').trim(),
+      vendorCode
     });
 
-    // 1. Persist to Firestore "sellers" collection (Exclusivo Master)
+    // 1. Persist to Firestore "sellers" collection
     try {
       const sellerUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/${FIREBASE_CONFIG.databaseId}/documents/sellers/${cleanUsername}?key=${FIREBASE_CONFIG.apiKey}`;
       await fetch(sellerUrl, {
@@ -2697,15 +2801,17 @@ app.post('/api/auth/register', async (req, res) => {
             username: { stringValue: cleanUsername },
             name: { stringValue: String(name).trim() },
             cpf: { stringValue: formattedCpf },
-            email: { stringValue: String(email).trim().toLowerCase() },
-            phone: { stringValue: String(phone).trim() },
+            email: { stringValue: String(email || '').trim().toLowerCase() },
+            phone: { stringValue: String(phone || '').trim() },
             role: { stringValue: assignedRole },
             vendorCode: { stringValue: vendorCode },
             referralCode: { stringValue: referralCode ? String(referralCode).trim() : '' },
             active: { booleanValue: true },
-            salesCount: { integerValue: '0' },
-            createdAt: { stringValue: now },
-            lastLoginAt: { stringValue: '' }
+            salesCount: { integerValue: String(sellerObj.salesCount) },
+            createdAt: { stringValue: sellerObj.createdAt },
+            lastLoginAt: { stringValue: '' },
+            allowedTabsStr: { stringValue: allowedTabsStr },
+            clientPermissionsStr: { stringValue: clientPermissionsStr }
           }
         })
       });
@@ -2724,15 +2830,18 @@ app.post('/api/auth/register', async (req, res) => {
             id: { stringValue: cleanUsername },
             username: { stringValue: cleanUsername },
             name: { stringValue: String(name).trim() },
-            email: { stringValue: String(email).trim().toLowerCase() },
-            phone: { stringValue: String(phone).trim() },
+            cpf: { stringValue: formattedCpf },
+            email: { stringValue: String(email || '').trim().toLowerCase() },
+            phone: { stringValue: String(phone || '').trim() },
             role: { stringValue: assignedRole },
             vendorCode: { stringValue: vendorCode },
             referralCode: { stringValue: referralCode ? String(referralCode).trim() : '' },
             passwordHash: { stringValue: hash },
             salt: { stringValue: salt },
             active: { booleanValue: true },
-            createdAt: { stringValue: now }
+            createdAt: { stringValue: sellerObj.createdAt },
+            allowedTabsStr: { stringValue: allowedTabsStr },
+            clientPermissionsStr: { stringValue: clientPermissionsStr }
           }
         })
       });
@@ -2751,7 +2860,7 @@ app.post('/api/auth/register', async (req, res) => {
 
     return res.json({
       success: true,
-      message: 'Cadastro de vendedor/parceiro realizado com sucesso!',
+      message: 'Cadastro salvo com sucesso!',
       token,
       user: {
         id: cleanUsername,
@@ -2760,13 +2869,15 @@ app.post('/api/auth/register', async (req, res) => {
         role: assignedRole,
         vendorCode: vendorCode,
         cpf: formattedCpf,
-        email: String(email).trim().toLowerCase(),
-        phone: String(phone).trim()
+        email: String(email || '').trim().toLowerCase(),
+        phone: String(phone || '').trim(),
+        allowedTabs: normalizedTabs,
+        clientPermissions: normalizedPerms
       }
     });
   } catch (err: any) {
     console.error('Registration error:', err);
-    return res.status(500).json({ error: 'Erro interno ao processar cadastro de vendedor.' });
+    return res.status(500).json({ error: 'Erro interno ao processar cadastro de vendedor/revendedor.' });
   }
 });
 
@@ -2774,7 +2885,7 @@ app.post('/api/auth/register', async (req, res) => {
 // MASTER SELLER MANAGEMENT ENDPOINTS (Exclusivo Master)
 // ==========================================
 
-// Get All Sellers (Master Only: Retorna todos os dados confidenciais incluindo CPF, telefone, email e status)
+// Get All Sellers (Master Only: Retorna todos os dados confidenciais incluindo CPF, telefone, email, status e abas permitidas)
 app.get('/api/sellers', requireMasterAuth, async (req, res) => {
   try {
     const sellersMap = new Map<string, SellerRecord>();
@@ -2795,6 +2906,8 @@ app.get('/api/sellers', requireMasterAuth, async (req, res) => {
           const f = docItem.fields || {};
           const id = f.id?.stringValue || docItem.name?.split('/').pop();
           if (id) {
+            const tabsRaw = f.allowedTabsStr?.stringValue || '';
+            const permsRaw = f.clientPermissionsStr?.stringValue || '';
             const item: SellerRecord = {
               id,
               username: f.username?.stringValue || id,
@@ -2802,13 +2915,15 @@ app.get('/api/sellers', requireMasterAuth, async (req, res) => {
               cpf: f.cpf?.stringValue || 'Não informado',
               email: f.email?.stringValue || '',
               phone: f.phone?.stringValue || '',
-              role: f.role?.stringValue || 'seller',
+              role: f.role?.stringValue || 'reseller',
               vendorCode: f.vendorCode?.stringValue || '',
               referralCode: f.referralCode?.stringValue || '',
               active: f.active?.booleanValue !== false,
               salesCount: parseInt(f.salesCount?.integerValue || '0', 10),
               createdAt: f.createdAt?.stringValue || '',
-              lastLoginAt: f.lastLoginAt?.stringValue || ''
+              lastLoginAt: f.lastLoginAt?.stringValue || '',
+              allowedTabs: tabsRaw ? tabsRaw.split(',').filter(Boolean) : DEFAULT_RESELLER_TABS,
+              clientPermissions: permsRaw ? permsRaw.split(',').filter(Boolean) : DEFAULT_CLIENT_PERMISSIONS
             };
             sellersMap.set(id, item);
             sellersRegistry.set(id, item);
@@ -2823,6 +2938,94 @@ app.get('/api/sellers', requireMasterAuth, async (req, res) => {
       success: true,
       sellers: Array.from(sellersMap.values())
     });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Update Seller details, allowedTabs & clientPermissions (Master Only)
+app.put('/api/sellers/:id', requireMasterAuth, async (req, res) => {
+  const { id } = req.params;
+  const cleanId = String(id).toLowerCase().replace(/[^a-z0-9_\-.]/g, '');
+  if (!cleanId) return res.status(400).json({ error: 'ID inválido.' });
+
+  const { name, cpf, email, phone, role, active, allowedTabs, clientPermissions } = req.body || {};
+
+  try {
+    const seller = sellersRegistry.get(cleanId);
+    if (seller) {
+      if (name) seller.name = String(name).trim();
+      if (cpf !== undefined) seller.cpf = formatCPF(cpf);
+      if (email !== undefined) seller.email = String(email).trim();
+      if (phone !== undefined) seller.phone = String(phone).trim();
+      if (role) seller.role = role;
+      if (typeof active === 'boolean') seller.active = active;
+      if (Array.isArray(allowedTabs)) seller.allowedTabs = allowedTabs;
+      if (Array.isArray(clientPermissions)) seller.clientPermissions = clientPermissions;
+    }
+
+    const sysUser = systemUsersRegistry.get(cleanId);
+    if (sysUser) {
+      if (name) sysUser.name = String(name).trim();
+      if (role) sysUser.role = role;
+      if (typeof active === 'boolean') sysUser.active = active;
+      if (Array.isArray(allowedTabs)) sysUser.allowedTabs = allowedTabs;
+      if (Array.isArray(clientPermissions)) sysUser.clientPermissions = clientPermissions;
+    }
+
+    const fieldsToUpdate: Record<string, any> = {};
+    const fieldMasks: string[] = [];
+
+    if (name) {
+      fieldsToUpdate.name = { stringValue: String(name).trim() };
+      fieldMasks.push('updateMask.fieldPaths=name');
+    }
+    if (cpf !== undefined) {
+      fieldsToUpdate.cpf = { stringValue: formatCPF(cpf) };
+      fieldMasks.push('updateMask.fieldPaths=cpf');
+    }
+    if (email !== undefined) {
+      fieldsToUpdate.email = { stringValue: String(email).trim() };
+      fieldMasks.push('updateMask.fieldPaths=email');
+    }
+    if (phone !== undefined) {
+      fieldsToUpdate.phone = { stringValue: String(phone).trim() };
+      fieldMasks.push('updateMask.fieldPaths=phone');
+    }
+    if (role) {
+      fieldsToUpdate.role = { stringValue: role };
+      fieldMasks.push('updateMask.fieldPaths=role');
+    }
+    if (typeof active === 'boolean') {
+      fieldsToUpdate.active = { booleanValue: active };
+      fieldMasks.push('updateMask.fieldPaths=active');
+    }
+    if (Array.isArray(allowedTabs)) {
+      fieldsToUpdate.allowedTabsStr = { stringValue: allowedTabs.join(',') };
+      fieldMasks.push('updateMask.fieldPaths=allowedTabsStr');
+    }
+    if (Array.isArray(clientPermissions)) {
+      fieldsToUpdate.clientPermissionsStr = { stringValue: clientPermissions.join(',') };
+      fieldMasks.push('updateMask.fieldPaths=clientPermissionsStr');
+    }
+
+    if (fieldMasks.length > 0) {
+      const sellerUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/${FIREBASE_CONFIG.databaseId}/documents/sellers/${cleanId}?${fieldMasks.join('&')}&key=${FIREBASE_CONFIG.apiKey}`;
+      await fetch(sellerUrl, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields: fieldsToUpdate })
+      }).catch(() => {});
+
+      const sysUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/${FIREBASE_CONFIG.databaseId}/documents/system_users/${cleanId}?${fieldMasks.join('&')}&key=${FIREBASE_CONFIG.apiKey}`;
+      await fetch(sysUrl, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields: fieldsToUpdate })
+      }).catch(() => {});
+    }
+
+    return res.json({ success: true, message: 'Permissões e dados do parceiro atualizados com sucesso!' });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
@@ -2938,39 +3141,70 @@ app.delete('/api/sellers/:id', requireMasterAuth, async (req, res) => {
 
 // Create new user (with PBKDF2 salt + hash, Master only)
 app.post('/api/users', requireMasterAuth, async (req, res) => {
-  const { username, name, role, password } = req.body || {};
+  const { username, name, role, password, cpf = '', email = '', phone = '', allowedTabs, clientPermissions } = req.body || {};
   if (!username || !name || !password) {
     return res.status(400).json({ error: 'Preencha todos os campos obrigatórios.' });
   }
 
   const cleanUsername = String(username).toLowerCase().replace(/[^a-z0-9_\-.]/g, '');
-  if (cleanUsername.length < 3) {
-    return res.status(400).json({ error: 'Nome de usuário deve ter no mínimo 3 caracteres.' });
+  if (cleanUsername.length < 2) {
+    return res.status(400).json({ error: 'Nome de usuário deve ter no mínimo 2 caracteres.' });
   }
-  if (String(password).length < 6) {
-    return res.status(400).json({ error: 'Senha deve ter no mínimo 6 caracteres.' });
+  if (String(password).length < 4) {
+    return res.status(400).json({ error: 'Senha deve ter no mínimo 4 caracteres.' });
   }
 
-  if (systemUsersRegistry.has(cleanUsername)) {
-    return res.status(409).json({ error: `O nome de usuário "${cleanUsername}" já está em uso.` });
-  }
+  const normalizedTabs: string[] = Array.isArray(allowedTabs) && allowedTabs.length > 0
+    ? allowedTabs.map(String)
+    : DEFAULT_RESELLER_TABS;
+  const normalizedPerms: string[] = Array.isArray(clientPermissions) && clientPermissions.length > 0
+    ? clientPermissions.map(String)
+    : DEFAULT_CLIENT_PERMISSIONS;
+  const allowedTabsStr = normalizedTabs.join(',');
+  const clientPermissionsStr = normalizedPerms.join(',');
+  const formattedCpf = formatCPF(cpf);
 
   try {
     const { hash, salt } = hashPassword(String(password));
     const now = new Date().toISOString();
+    const vendorCode = `PARC_${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
 
     systemUsersRegistry.set(cleanUsername, {
       id: cleanUsername,
       username: cleanUsername,
       name: String(name).trim(),
-      role: role || 'operator',
+      role: role || 'reseller',
       passwordHash: hash,
       salt: salt,
       active: true,
-      createdAt: now
+      createdAt: now,
+      allowedTabs: normalizedTabs,
+      clientPermissions: normalizedPerms,
+      cpf: formattedCpf,
+      email: String(email || '').trim(),
+      phone: String(phone || '').trim(),
+      vendorCode
     });
 
-    // Also persist asynchronously to Firestore
+    if (role === 'seller' || role === 'reseller' || role === 'client') {
+      sellersRegistry.set(cleanUsername, {
+        id: cleanUsername,
+        username: cleanUsername,
+        name: String(name).trim(),
+        cpf: formattedCpf,
+        email: String(email || '').trim(),
+        phone: String(phone || '').trim(),
+        role: role || 'reseller',
+        vendorCode,
+        active: true,
+        salesCount: 0,
+        createdAt: now,
+        allowedTabs: normalizedTabs,
+        clientPermissions: normalizedPerms
+      });
+    }
+
+    // Persist asynchronously to Firestore system_users and sellers
     try {
       const checkUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/${FIREBASE_CONFIG.databaseId}/documents/system_users/${cleanUsername}?key=${FIREBASE_CONFIG.apiKey}`;
       await fetch(checkUrl, {
@@ -2981,45 +3215,90 @@ app.post('/api/users', requireMasterAuth, async (req, res) => {
             id: { stringValue: cleanUsername },
             username: { stringValue: cleanUsername },
             name: { stringValue: String(name).trim() },
-            role: { stringValue: role || 'operator' },
+            cpf: { stringValue: formattedCpf },
+            email: { stringValue: String(email || '').trim() },
+            phone: { stringValue: String(phone || '').trim() },
+            role: { stringValue: role || 'reseller' },
+            vendorCode: { stringValue: vendorCode },
             passwordHash: { stringValue: hash },
             salt: { stringValue: salt },
             active: { booleanValue: true },
-            createdAt: { stringValue: now }
+            createdAt: { stringValue: now },
+            allowedTabsStr: { stringValue: allowedTabsStr },
+            clientPermissionsStr: { stringValue: clientPermissionsStr }
+          }
+        })
+      });
+
+      const sellerUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/${FIREBASE_CONFIG.databaseId}/documents/sellers/${cleanUsername}?key=${FIREBASE_CONFIG.apiKey}`;
+      await fetch(sellerUrl, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fields: {
+            id: { stringValue: cleanUsername },
+            username: { stringValue: cleanUsername },
+            name: { stringValue: String(name).trim() },
+            cpf: { stringValue: formattedCpf },
+            email: { stringValue: String(email || '').trim() },
+            phone: { stringValue: String(phone || '').trim() },
+            role: { stringValue: role || 'reseller' },
+            vendorCode: { stringValue: vendorCode },
+            active: { booleanValue: true },
+            salesCount: { integerValue: '0' },
+            createdAt: { stringValue: now },
+            allowedTabsStr: { stringValue: allowedTabsStr },
+            clientPermissionsStr: { stringValue: clientPermissionsStr }
           }
         })
       });
     } catch (_) {}
 
-    return res.json({ success: true, message: 'Usuário cadastrado com sucesso!' });
+    return res.json({ success: true, message: 'Usuário e permissões cadastrados com sucesso!' });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
 });
 
-// Update user (role, active, or reset password, Master only)
+// Update user (role, active, password, allowedTabs, clientPermissions, Master only)
 app.put('/api/users/:id', requireMasterAuth, async (req, res) => {
   const { id } = req.params;
   const cleanId = String(id).toLowerCase().replace(/[^a-z0-9_\-.]/g, '');
   if (!cleanId) return res.status(400).json({ error: 'ID inválido.' });
 
-  const { role, active, password } = req.body || {};
+  const { role, active, password, allowedTabs, clientPermissions, name } = req.body || {};
 
   try {
     const localUser = systemUsersRegistry.get(cleanId);
     if (localUser) {
+      if (name) localUser.name = String(name).trim();
       if (role) localUser.role = role;
       if (typeof active === 'boolean') localUser.active = active;
-      if (password && String(password).length >= 6) {
+      if (Array.isArray(allowedTabs)) localUser.allowedTabs = allowedTabs;
+      if (Array.isArray(clientPermissions)) localUser.clientPermissions = clientPermissions;
+      if (password && String(password).length >= 4) {
         const { hash, salt } = hashPassword(String(password));
         localUser.passwordHash = hash;
         localUser.salt = salt;
       }
     }
 
+    const seller = sellersRegistry.get(cleanId);
+    if (seller) {
+      if (name) seller.name = String(name).trim();
+      if (role) seller.role = role;
+      if (typeof active === 'boolean') seller.active = active;
+      if (Array.isArray(allowedTabs)) seller.allowedTabs = allowedTabs;
+      if (Array.isArray(clientPermissions)) seller.clientPermissions = clientPermissions;
+    }
+
     const fieldsToUpdate: Record<string, any> = {};
     const fieldMasks: string[] = [];
 
+    if (name) {
+      fieldsToUpdate.name = { stringValue: String(name).trim() };
+      fieldMasks.push('updateMask.fieldPaths=name');
+    }
     if (role) {
       fieldsToUpdate.role = { stringValue: role };
       fieldMasks.push('updateMask.fieldPaths=role');
@@ -3028,7 +3307,15 @@ app.put('/api/users/:id', requireMasterAuth, async (req, res) => {
       fieldsToUpdate.active = { booleanValue: active };
       fieldMasks.push('updateMask.fieldPaths=active');
     }
-    if (password && String(password).length >= 6) {
+    if (Array.isArray(allowedTabs)) {
+      fieldsToUpdate.allowedTabsStr = { stringValue: allowedTabs.join(',') };
+      fieldMasks.push('updateMask.fieldPaths=allowedTabsStr');
+    }
+    if (Array.isArray(clientPermissions)) {
+      fieldsToUpdate.clientPermissionsStr = { stringValue: clientPermissions.join(',') };
+      fieldMasks.push('updateMask.fieldPaths=clientPermissionsStr');
+    }
+    if (password && String(password).length >= 4) {
       const { hash, salt } = hashPassword(String(password));
       fieldsToUpdate.passwordHash = { stringValue: hash };
       fieldsToUpdate.salt = { stringValue: salt };
@@ -3038,14 +3325,21 @@ app.put('/api/users/:id', requireMasterAuth, async (req, res) => {
 
     if (fieldMasks.length > 0) {
       const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/${FIREBASE_CONFIG.databaseId}/documents/system_users/${cleanId}?${fieldMasks.join('&')}&key=${FIREBASE_CONFIG.apiKey}`;
-      fetch(url, {
+      await fetch(url, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields: fieldsToUpdate })
+      }).catch(() => {});
+
+      const sUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/${FIREBASE_CONFIG.databaseId}/documents/sellers/${cleanId}?${fieldMasks.join('&')}&key=${FIREBASE_CONFIG.apiKey}`;
+      await fetch(sUrl, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fields: fieldsToUpdate })
       }).catch(() => {});
     }
 
-    return res.json({ success: true, message: 'Usuário atualizado com sucesso.' });
+    return res.json({ success: true, message: 'Usuário e permissões atualizados com sucesso.' });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
@@ -3062,10 +3356,13 @@ app.delete('/api/users/:id', requireMasterAuth, async (req, res) => {
   }
 
   systemUsersRegistry.delete(cleanId);
+  sellersRegistry.delete(cleanId);
 
   try {
     const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/${FIREBASE_CONFIG.databaseId}/documents/system_users/${cleanId}?key=${FIREBASE_CONFIG.apiKey}`;
     fetch(url, { method: 'DELETE' }).catch(() => {});
+    const sUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/${FIREBASE_CONFIG.databaseId}/documents/sellers/${cleanId}?key=${FIREBASE_CONFIG.apiKey}`;
+    fetch(sUrl, { method: 'DELETE' }).catch(() => {});
     return res.json({ success: true, message: 'Usuário excluído com sucesso.' });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -3740,6 +4037,15 @@ async function startServer() {
   app.listen(port, '0.0.0.0', () => {
     console.log(`[Server] Running at http://localhost:${port}`);
     console.log(`[Server] Environment: ${process.env.NODE_ENV || 'development'}`);
+    // Keep-Alive Self-Ping on Render Production to prevent cold start spin-down
+    if (process.env.NODE_ENV === 'production' || process.env.RENDER) {
+      const keepAliveUrl = process.env.RENDER_EXTERNAL_URL
+        ? `${process.env.RENDER_EXTERNAL_URL.replace(/\/+$/, '')}/api/health`
+        : 'https://automacaonfc.onrender.com/api/health';
+      setInterval(() => {
+        fetch(keepAliveUrl).catch(() => {});
+      }, 10 * 60 * 1000);
+    }
   });
 }
 

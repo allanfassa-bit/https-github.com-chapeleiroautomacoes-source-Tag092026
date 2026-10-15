@@ -21,8 +21,15 @@ import {
   Mail,
   CreditCard,
   ExternalLink,
-  ShieldAlert
+  ShieldAlert,
+  LayoutGrid,
+  CheckSquare,
+  Square,
+  Sparkles
 } from 'lucide-react';
+import { SYSTEM_TAB_OPTIONS, CLIENT_PERMISSION_OPTIONS } from './SellerRegisterModal';
+import { db } from '../firebase';
+import { collection, getDocs, doc, setDoc } from 'firebase/firestore';
 
 export interface SystemUserData {
   id: string;
@@ -33,6 +40,11 @@ export interface SystemUserData {
   createdAt: string;
   lastLoginAt?: string;
   vendorCode?: string;
+  allowedTabs?: string[];
+  clientPermissions?: string[];
+  cpf?: string;
+  email?: string;
+  phone?: string;
 }
 
 export interface SellerItem {
@@ -49,6 +61,8 @@ export interface SellerItem {
   salesCount: number;
   createdAt: string;
   lastLoginAt?: string;
+  allowedTabs?: string[];
+  clientPermissions?: string[];
 }
 
 export interface BlockedAttemptItem {
@@ -82,8 +96,25 @@ export const UserManagementPanel: React.FC<UserManagementPanelProps> = ({ curren
   // New User Form State
   const [newUsername, setNewUsername] = useState('');
   const [newName, setNewName] = useState('');
-  const [newRole, setNewRole] = useState<'master' | 'operator' | 'support' | 'seller' | 'reseller'>('seller');
+  const [newCpf, setNewCpf] = useState('');
+  const [newPhone, setNewPhone] = useState('');
+  const [newEmail, setNewEmail] = useState('');
+  const [newRole, setNewRole] = useState<'master' | 'operator' | 'support' | 'seller' | 'reseller' | 'client'>('reseller');
   const [newPassword, setNewPassword] = useState('');
+  const [newAllowedTabs, setNewAllowedTabs] = useState<string[]>([
+    'leads',
+    'site_preview',
+    'overview',
+    'sales_pitch',
+    'totem_config',
+    'portal'
+  ]);
+  const [newClientPermissions, setNewClientPermissions] = useState<string[]>([
+    'mini_site',
+    'nfc_totem',
+    'leads_crm',
+    'whatsapp_button'
+  ]);
   const [formError, setFormError] = useState('');
   const [formSuccess, setFormSuccess] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -93,6 +124,17 @@ export const UserManagementPanel: React.FC<UserManagementPanelProps> = ({ curren
   const [newResetPassword, setNewResetPassword] = useState('');
   const [resetSuccessMsg, setResetSuccessMsg] = useState('');
   const [copiedInviteLink, setCopiedInviteLink] = useState(false);
+
+  // Permissions editor modal state
+  const [permTarget, setPermTarget] = useState<{
+    id: string;
+    username: string;
+    name: string;
+    isSellerOnly?: boolean;
+    allowedTabs: string[];
+    clientPermissions: string[];
+  } | null>(null);
+  const [permSaving, setPermSaving] = useState(false);
 
   const fetchUsersAndSecurity = async () => {
     try {
@@ -108,7 +150,8 @@ export const UserManagementPanel: React.FC<UserManagementPanelProps> = ({ curren
         setBlockedList(data.blockedAttempts || []);
       }
 
-      // Fetch confidential sellers table (Master exclusive)
+      // Fetch confidential sellers table (Master exclusive) + Firestore fallback
+      let apiSellers: SellerItem[] = [];
       try {
         const sRes = await fetch('/api/sellers', {
           headers: {
@@ -117,10 +160,47 @@ export const UserManagementPanel: React.FC<UserManagementPanelProps> = ({ curren
         });
         if (sRes.ok) {
           const sData = await sRes.json();
-          setSellers(sData.sellers || []);
+          apiSellers = sData.sellers || [];
         }
       } catch (sErr) {
         console.warn('Erro ao carregar vendedores:', sErr);
+      }
+
+      try {
+        const snap = await getDocs(collection(db, 'sellers'));
+        const mapById = new Map<string, SellerItem>();
+        apiSellers.forEach((s) => mapById.set(s.id, s));
+        snap.forEach((docSnap) => {
+          const d = docSnap.data();
+          if (d && d.username) {
+            const existing = mapById.get(docSnap.id);
+            const parsedTabs = typeof d.allowedTabs === 'string'
+              ? d.allowedTabs.split(',').map((t: string) => t.trim()).filter(Boolean)
+              : Array.isArray(d.allowedTabs) ? d.allowedTabs : existing?.allowedTabs;
+            const parsedPerms = typeof d.clientPermissions === 'string'
+              ? d.clientPermissions.split(',').map((t: string) => t.trim()).filter(Boolean)
+              : Array.isArray(d.clientPermissions) ? d.clientPermissions : existing?.clientPermissions;
+            mapById.set(docSnap.id, {
+              id: docSnap.id,
+              username: d.username,
+              name: d.name || d.username,
+              cpf: d.cpf || existing?.cpf || '',
+              email: d.email || existing?.email || '',
+              phone: d.phone || existing?.phone || '',
+              role: d.role || existing?.role || 'seller',
+              vendorCode: d.vendorCode || existing?.vendorCode || d.username,
+              active: d.active !== undefined ? Boolean(d.active) : true,
+              salesCount: Number(d.salesCount || existing?.salesCount || 0),
+              createdAt: d.createdAt || existing?.createdAt || new Date().toISOString(),
+              lastLoginAt: d.lastLoginAt || existing?.lastLoginAt,
+              allowedTabs: parsedTabs,
+              clientPermissions: parsedPerms
+            });
+          }
+        });
+        setSellers(Array.from(mapById.values()));
+      } catch (_) {
+        setSellers(apiSellers);
       }
     } catch (err) {
       console.error('Erro ao buscar usuários do sistema:', err);
@@ -179,16 +259,16 @@ export const UserManagementPanel: React.FC<UserManagementPanelProps> = ({ curren
     const cleanName = newName.trim();
     const cleanPass = newPassword.trim();
 
-    if (!cleanUsername || cleanUsername.length < 3) {
-      setFormError('O nome de usuário deve ter no mínimo 3 caracteres (apenas letras e números).');
+    if (!cleanUsername || cleanUsername.length < 2) {
+      setFormError('O nome de usuário deve ter no mínimo 2 caracteres.');
       return;
     }
     if (!cleanName) {
       setFormError('Informe o nome completo do usuário.');
       return;
     }
-    if (!cleanPass || cleanPass.length < 6) {
-      setFormError('A senha deve ter no mínimo 6 caracteres por exigência de segurança.');
+    if (!cleanPass || cleanPass.length < 4) {
+      setFormError('A senha deve ter no mínimo 4 caracteres.');
       return;
     }
 
@@ -204,7 +284,12 @@ export const UserManagementPanel: React.FC<UserManagementPanelProps> = ({ curren
           username: cleanUsername,
           name: cleanName,
           role: newRole,
-          password: cleanPass
+          password: cleanPass,
+          cpf: newCpf.trim(),
+          phone: newPhone.trim(),
+          email: newEmail.trim(),
+          allowedTabs: newAllowedTabs,
+          clientPermissions: newClientPermissions
         })
       });
 
@@ -214,9 +299,31 @@ export const UserManagementPanel: React.FC<UserManagementPanelProps> = ({ curren
         return;
       }
 
-      setFormSuccess(`Usuário "${cleanUsername}" cadastrado com sucesso com perfil ${newRole.toUpperCase()}!`);
+      // Also save in Firestore client-side if seller/reseller/client
+      const docId = cleanUsername.replace(/[^a-z0-9_\-]/g, '_');
+      try {
+        await setDoc(doc(db, 'sellers', docId), {
+          id: docId,
+          username: cleanUsername,
+          name: cleanName,
+          cpf: newCpf.trim() || 'Não informado',
+          phone: newPhone.trim(),
+          email: newEmail.trim(),
+          role: newRole,
+          vendorCode: cleanUsername,
+          allowedTabs: newAllowedTabs.join(','),
+          clientPermissions: newClientPermissions.join(','),
+          active: true,
+          createdAt: new Date().toISOString()
+        }, { merge: true });
+      } catch (_) {}
+
+      setFormSuccess(`Usuário "${cleanUsername}" salvo com sucesso com as abas e permissões selecionadas!`);
       setNewUsername('');
       setNewName('');
+      setNewCpf('');
+      setNewPhone('');
+      setNewEmail('');
       setNewPassword('');
       setIsCreatingUser(false);
       await fetchUsersAndSecurity();
@@ -225,6 +332,50 @@ export const UserManagementPanel: React.FC<UserManagementPanelProps> = ({ curren
       setFormError(err.message || 'Erro de conexão com o servidor.');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleSavePermissions = async () => {
+    if (!permTarget) return;
+    try {
+      setPermSaving(true);
+      await fetch(`/api/users/${permTarget.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${effectiveToken || ''}`
+        },
+        body: JSON.stringify({
+          allowedTabs: permTarget.allowedTabs,
+          clientPermissions: permTarget.clientPermissions
+        })
+      });
+      await fetch(`/api/sellers/${permTarget.id}/status`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${effectiveToken || ''}`
+        },
+        body: JSON.stringify({
+          allowedTabs: permTarget.allowedTabs,
+          clientPermissions: permTarget.clientPermissions
+        })
+      });
+      try {
+        await setDoc(doc(db, 'sellers', permTarget.id), {
+          allowedTabs: permTarget.allowedTabs.join(','),
+          clientPermissions: permTarget.clientPermissions.join(',')
+        }, { merge: true });
+      } catch (_) {}
+
+      setFormSuccess(`Permissões e abas de @${permTarget.username} atualizadas com sucesso!`);
+      setPermTarget(null);
+      await fetchUsersAndSecurity();
+      setTimeout(() => setFormSuccess(''), 4000);
+    } catch (err) {
+      console.error('Erro ao salvar permissões:', err);
+    } finally {
+      setPermSaving(false);
     }
   };
 
@@ -533,8 +684,9 @@ export const UserManagementPanel: React.FC<UserManagementPanelProps> = ({ curren
                 onChange={(e) => setNewRole(e.target.value as any)}
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-hidden focus:border-cyan-500"
               >
+                <option value="reseller">🤝 Revendedor Parceiro (Clientes, Mini-Sites &amp; Comissões)</option>
                 <option value="seller">💼 Vendedor / Representante Comercial (Venda de Placas)</option>
-                <option value="reseller">🤝 Revendedor Parceiro (Afiliado com Comissões)</option>
+                <option value="client">🏪 Cliente / Lojista (Mini-Site &amp; Placa NFC)</option>
                 <option value="operator">⚙️ Operador de Sistema (CRM &amp; Cadastros)</option>
                 <option value="master">👑 Administrador Master (Acesso Total)</option>
                 <option value="support">🛡️ Suporte Técnico (Visualizador)</option>
@@ -548,12 +700,124 @@ export const UserManagementPanel: React.FC<UserManagementPanelProps> = ({ curren
               <input
                 type="password"
                 required
-                placeholder="Mínimo 6 caracteres"
+                placeholder="Mínimo 4 caracteres"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-hidden focus:border-cyan-500"
               />
               <span className="text-[10px] text-slate-500">Criptografada com PBKDF2.</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="space-y-1">
+              <label className="block text-[11px] font-bold text-slate-300 uppercase">
+                CPF ou CNPJ (Opcional)
+              </label>
+              <input
+                type="text"
+                placeholder="000.000.000-00"
+                value={newCpf}
+                onChange={(e) => setNewCpf(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-emerald-400 focus:outline-hidden focus:border-cyan-500"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="block text-[11px] font-bold text-slate-300 uppercase">
+                WhatsApp / Telefone
+              </label>
+              <input
+                type="text"
+                placeholder="(11) 99999-9999"
+                value={newPhone}
+                onChange={(e) => setNewPhone(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-hidden focus:border-cyan-500"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="block text-[11px] font-bold text-slate-300 uppercase">
+                E-mail
+              </label>
+              <input
+                type="email"
+                placeholder="contato@empresa.com"
+                value={newEmail}
+                onChange={(e) => setNewEmail(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-hidden focus:border-cyan-500"
+              />
+            </div>
+          </div>
+
+          {/* Allowed Tabs & Client Features Selector */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+            <div className="p-3.5 bg-slate-950 border border-slate-800 rounded-2xl space-y-2">
+              <label className="text-[11px] font-black text-emerald-400 uppercase flex items-center gap-1.5">
+                <LayoutGrid className="w-3.5 h-3.5" />
+                Abas do Sistema Liberadas para este Usuário
+              </label>
+              <div className="grid grid-cols-1 gap-1.5">
+                {SYSTEM_TAB_OPTIONS.map((tab) => {
+                  const checked = newAllowedTabs.includes(tab.id);
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() =>
+                        setNewAllowedTabs((prev) =>
+                          prev.includes(tab.id) ? prev.filter((t) => t !== tab.id) : [...prev, tab.id]
+                        )
+                      }
+                      className={`p-2 rounded-xl border text-left transition flex items-center gap-2 cursor-pointer ${
+                        checked
+                          ? 'bg-emerald-500/10 border-emerald-500/40 text-white'
+                          : 'bg-slate-900/50 border-slate-800 text-slate-400'
+                      }`}
+                    >
+                      {checked ? (
+                        <CheckSquare className="w-4 h-4 text-emerald-400 shrink-0" />
+                      ) : (
+                        <Square className="w-4 h-4 text-slate-600 shrink-0" />
+                      )}
+                      <span className="text-xs font-bold">{tab.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-slate-950 border border-slate-800 rounded-2xl space-y-2">
+              <label className="text-[11px] font-black text-cyan-400 uppercase flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5" />
+                O que o Revendedor / Cliente pode utilizar
+              </label>
+              <div className="grid grid-cols-1 gap-1.5">
+                {CLIENT_PERMISSION_OPTIONS.map((perm) => {
+                  const checked = newClientPermissions.includes(perm.id);
+                  return (
+                    <button
+                      key={perm.id}
+                      type="button"
+                      onClick={() =>
+                        setNewClientPermissions((prev) =>
+                          prev.includes(perm.id) ? prev.filter((p) => p !== perm.id) : [...prev, perm.id]
+                        )
+                      }
+                      className={`p-2 rounded-xl border text-left transition flex items-center gap-2 cursor-pointer ${
+                        checked
+                          ? 'bg-cyan-500/10 border-cyan-500/40 text-white'
+                          : 'bg-slate-900/50 border-slate-800 text-slate-400'
+                      }`}
+                    >
+                      {checked ? (
+                        <CheckSquare className="w-4 h-4 text-cyan-400 shrink-0" />
+                      ) : (
+                        <Square className="w-4 h-4 text-slate-600 shrink-0" />
+                      )}
+                      <span className="text-xs font-bold">{perm.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
@@ -570,7 +834,7 @@ export const UserManagementPanel: React.FC<UserManagementPanelProps> = ({ curren
               onClick={() => setIsCreatingUser(false)}
               className="px-4 py-2 bg-slate-800 text-slate-300 text-xs font-bold rounded-xl hover:bg-slate-700 transition cursor-pointer"
             >
-              Cancelar
+              Cancelar / Fechar
             </button>
             <button
               type="submit"
@@ -710,6 +974,28 @@ export const UserManagementPanel: React.FC<UserManagementPanelProps> = ({ curren
                       </td>
                       <td className="py-3 px-3 text-right">
                         <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPermTarget({
+                                id: user.id,
+                                username: user.username,
+                                name: user.name,
+                                allowedTabs: user.allowedTabs && user.allowedTabs.length > 0
+                                  ? user.allowedTabs
+                                  : SYSTEM_TAB_OPTIONS.map((t) => t.id),
+                                clientPermissions: user.clientPermissions && user.clientPermissions.length > 0
+                                  ? user.clientPermissions
+                                  : CLIENT_PERMISSION_OPTIONS.map((p) => p.id)
+                              });
+                            }}
+                            className="px-2 py-1 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 rounded-lg transition cursor-pointer flex items-center gap-1 text-[10px] font-bold"
+                            title="Selecionar Abas e Recursos Liberados"
+                          >
+                            <LayoutGrid className="w-3 h-3 text-emerald-400" />
+                            <span>Abas</span>
+                          </button>
+
                           <button
                             type="button"
                             onClick={() => {
@@ -877,6 +1163,29 @@ export const UserManagementPanel: React.FC<UserManagementPanelProps> = ({ curren
                           <div className="flex items-center justify-end gap-1.5">
                             <button
                               type="button"
+                              onClick={() => {
+                                setPermTarget({
+                                  id: seller.id,
+                                  username: seller.username,
+                                  name: seller.name,
+                                  isSellerOnly: true,
+                                  allowedTabs: seller.allowedTabs && seller.allowedTabs.length > 0
+                                    ? seller.allowedTabs
+                                    : ['leads', 'site_preview', 'overview', 'sales_pitch', 'totem_config', 'portal'],
+                                  clientPermissions: seller.clientPermissions && seller.clientPermissions.length > 0
+                                    ? seller.clientPermissions
+                                    : ['mini_site', 'nfc_totem', 'leads_crm', 'whatsapp_button']
+                                });
+                              }}
+                              className="px-2 py-1 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 rounded-lg transition cursor-pointer flex items-center gap-1 text-[10px] font-bold"
+                              title="Configurar Abas e Recursos deste Vendedor/Revendedor"
+                            >
+                              <LayoutGrid className="w-3 h-3 text-emerald-400" />
+                              <span>Abas &amp; Uso</span>
+                            </button>
+
+                            <button
+                              type="button"
                               onClick={() => handleToggleSellerStatus(seller)}
                               className={`p-1.5 rounded-lg transition cursor-pointer ${
                                 seller.active 
@@ -966,6 +1275,138 @@ export const UserManagementPanel: React.FC<UserManagementPanelProps> = ({ curren
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* PERMISSIONS & ALLOWED TABS MODAL */}
+      {permTarget && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-sm animate-in fade-in duration-150"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setPermTarget(null);
+          }}
+        >
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-lg w-full max-h-[90dvh] flex flex-col text-white shadow-2xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <LayoutGrid className="w-5 h-5 text-emerald-400" />
+                <div>
+                  <h4 className="text-sm font-black">Abas &amp; Permissões de Acesso</h4>
+                  <p className="text-[11px] text-slate-400">
+                    Usuário: <strong className="text-white">{permTarget.name}</strong> (@{permTarget.username})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPermTarget(null)}
+                className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold flex items-center gap-1 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+                <span>Fechar</span>
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto space-y-4 flex-1">
+              <div className="space-y-2">
+                <label className="text-[11px] font-black text-emerald-400 uppercase block">
+                  1. Abas do Sistema que pode acessar:
+                </label>
+                <div className="grid grid-cols-1 gap-1.5">
+                  {SYSTEM_TAB_OPTIONS.map((tab) => {
+                    const checked = permTarget.allowedTabs.includes(tab.id);
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() =>
+                          setPermTarget({
+                            ...permTarget,
+                            allowedTabs: checked
+                              ? permTarget.allowedTabs.filter((t) => t !== tab.id)
+                              : [...permTarget.allowedTabs, tab.id]
+                          })
+                        }
+                        className={`p-2.5 rounded-xl border text-left transition flex items-start gap-2.5 cursor-pointer ${
+                          checked
+                            ? 'bg-emerald-500/10 border-emerald-500/50 text-white'
+                            : 'bg-slate-950 border-slate-800 text-slate-400'
+                        }`}
+                      >
+                        {checked ? (
+                          <CheckSquare className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                        ) : (
+                          <Square className="w-4 h-4 text-slate-600 shrink-0 mt-0.5" />
+                        )}
+                        <div>
+                          <div className="text-xs font-bold">{tab.label}</div>
+                          <div className="text-[10px] text-slate-400">{tab.desc}</div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[11px] font-black text-cyan-400 uppercase block">
+                  2. Recursos do Cliente / Mini-Site liberados:
+                </label>
+                <div className="grid grid-cols-1 gap-1.5">
+                  {CLIENT_PERMISSION_OPTIONS.map((perm) => {
+                    const checked = permTarget.clientPermissions.includes(perm.id);
+                    return (
+                      <button
+                        key={perm.id}
+                        type="button"
+                        onClick={() =>
+                          setPermTarget({
+                            ...permTarget,
+                            clientPermissions: checked
+                              ? permTarget.clientPermissions.filter((p) => p !== perm.id)
+                              : [...permTarget.clientPermissions, perm.id]
+                          })
+                        }
+                        className={`p-2.5 rounded-xl border text-left transition flex items-start gap-2.5 cursor-pointer ${
+                          checked
+                            ? 'bg-cyan-500/10 border-cyan-500/50 text-white'
+                            : 'bg-slate-950 border-slate-800 text-slate-400'
+                        }`}
+                      >
+                        {checked ? (
+                          <CheckSquare className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
+                        ) : (
+                          <Square className="w-4 h-4 text-slate-600 shrink-0 mt-0.5" />
+                        )}
+                        <div>
+                          <div className="text-xs font-bold">{perm.label}</div>
+                          <div className="text-[10px] text-slate-400">{perm.desc}</div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="px-5 py-3.5 border-t border-slate-800 flex justify-end gap-2 bg-slate-900">
+              <button
+                type="button"
+                onClick={() => setPermTarget(null)}
+                className="px-4 py-2 bg-slate-800 text-slate-300 text-xs font-bold rounded-xl hover:bg-slate-700 cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={permSaving}
+                onClick={handleSavePermissions}
+                className="px-5 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-black uppercase tracking-wider rounded-xl cursor-pointer shadow-md"
+              >
+                {permSaving ? 'Salvando...' : 'Salvar Abas & Permissões'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

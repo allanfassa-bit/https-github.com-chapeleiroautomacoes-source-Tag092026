@@ -62,10 +62,8 @@ service cloud.firestore {
     }
 
     function isValidSystemUser(data) {
-      return data.username is string && data.username.size() >= 3 && data.username.size() <= 100
-        && data.role is string && data.role in ['master', 'operator', 'support', 'client', 'seller', 'reseller', 'affiliate']
-        && data.passwordHash is string && data.passwordHash.size() > 0
-        && data.salt is string && data.salt.size() > 0;
+      return data.username is string && data.username.size() >= 2 && data.username.size() <= 100
+        && data.role is string && data.role in ['master', 'operator', 'support', 'client', 'seller', 'reseller', 'affiliate'];
     }
 
     function isValidLoginAttempt(data) {
@@ -74,7 +72,7 @@ service cloud.firestore {
         && data.lastAttemptAt is string;
     }
 
-    // CyberShield: System Users (PBKDF2 credentials) - Strictly Validated Schema
+    // CyberShield: System Users (PBKDF2 credentials & allowedTabs RBAC)
     match /system_users/{userId} {
       allow read: if true;
       allow create, update: if isValidId(userId) && isValidSystemUser(incoming());
@@ -89,19 +87,16 @@ service cloud.firestore {
     }
 
     function isValidSeller(data) {
-      return data.username is string && data.username.size() >= 3 && data.username.size() <= 100
+      return data.username is string && data.username.size() >= 2 && data.username.size() <= 100
         && data.name is string && data.name.size() > 0 && data.name.size() <= 200
-        && data.cpf is string && data.cpf.size() >= 11 && data.cpf.size() <= 20
-        && (!('email' in data) || data.email is string)
-        && (!('phone' in data) || data.phone is string)
-        && data.role is string && data.role in ['seller', 'reseller', 'affiliate'];
+        && data.role is string && data.role in ['seller', 'reseller', 'affiliate', 'client', 'operator'];
     }
 
-    // Confidential Sellers Collection (CPF, phone, email, status) - Exclusively Master Controlled via API
+    // Sellers & Resellers Collection (with allowedTabs and permissions)
     match /sellers/{sellerId} {
-      allow read: if false; // Protected: only Master via server API can view sensitive CPF data
-      allow create: if isValidId(sellerId) && isValidSeller(incoming());
-      allow update, delete: if false; // Updates and blocking strictly via Master authenticated API
+      allow read: if true;
+      allow create, update: if isValidId(sellerId) && isValidSeller(incoming());
+      allow delete: if isValidId(sellerId);
     }
   }
 }

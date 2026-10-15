@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { collection, onSnapshot, doc, getDoc, getDocs, setDoc, deleteDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from './firebase';
 import { PWAInstallButton } from './components/PWAInstallButton';
@@ -63,6 +64,7 @@ import {
   ExternalLink,
   AlertTriangle,
   ArrowRight,
+  GripVertical,
   Target,
   Key,
   Lock,
@@ -562,8 +564,18 @@ function RedirectHandler({ cleanId }: { cleanId: string }) {
 
 function MainApp() {
 
-  // Navigation / Tabs State
-  const [activeTab, setActiveTab] = useState<'leads' | 'crm' | 'site_preview' | 'nfc_designer' | 'dynamic_qr' | 'calculator' | 'portal' | 'users' | 'cardapio' | 'landing'>('dynamic_qr');
+  // Navigation / Tabs State — Synchronously initialized from URL (?tab=leads default)
+  const [activeTab, setActiveTab] = useState<'leads' | 'crm' | 'site_preview' | 'nfc_designer' | 'dynamic_qr' | 'calculator' | 'portal' | 'users' | 'cardapio' | 'landing'>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get('tab') as any;
+      const hashParam = window.location.hash.replace('#', '') as any;
+      const validTabs = ['dynamic_qr', 'leads', 'crm', 'site_preview', 'nfc_designer', 'calculator', 'portal', 'users', 'cardapio', 'landing'];
+      if (validTabs.includes(tabParam)) return tabParam;
+      if (validTabs.includes(hashParam)) return hashParam;
+    } catch (_) {}
+    return 'leads';
+  });
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isPlateScannerOpen, setIsPlateScannerOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
@@ -618,6 +630,11 @@ function MainApp() {
 
       if (chosenTab) {
         setActiveTab(chosenTab);
+      } else if (!params.get('minisite') && !params.get('m') && !params.get('cardapio') && !params.get('c') && !params.get('menu')) {
+        // Ensure URL stays explicitly on ?tab=leads when entering root domain
+        const url = new URL(window.location.href);
+        url.searchParams.set('tab', 'leads');
+        window.history.replaceState({ tab: 'leads' }, '', url.toString());
       }
 
       const handlePopState = (e: PopStateEvent) => {
@@ -890,12 +907,29 @@ function MainApp() {
   const [sortBy, setSortBy] = useState<'default' | 'fewest_reviews' | 'most_reviews' | 'lowest_rating' | 'highest_rating' | 'no_website_first'>('default');
   const [easyConversionOnly, setEasyConversionOnly] = useState<boolean>(false);
 
+  // CRM Funnel Drag-and-Drop and Framer Motion States
+  const [draggedLeadId, setDraggedLeadId] = useState<string | null>(null);
+  const [activeDropStage, setActiveDropStage] = useState<string | null>(null);
+  const [recentlyMovedLeadId, setRecentlyMovedLeadId] = useState<string | null>(null);
+  const [crmSearchQuery, setCrmSearchQuery] = useState<string>('');
+  const [activeQuickStageLeadId, setActiveQuickStageLeadId] = useState<string | null>(null);
+
   // Session Security & Role-Based Access Gatekeeper (Zero Trust Architecture)
   const [currentUser, setCurrentUser] = useState<AuthSessionUser | null>(() => {
     try {
+      const isPublicStandalone = Boolean(
+        new URLSearchParams(window.location.search).get('minisite') ||
+        new URLSearchParams(window.location.search).get('cardapio') ||
+        new URLSearchParams(window.location.search).get('c') ||
+        new URLSearchParams(window.location.search).get('menu')
+      );
       const stored = localStorage.getItem('alf_auth_user');
       if (stored) {
         return JSON.parse(stored);
+      }
+      // If someone accesses via a public client URL (?minisite=xxx or ?cardapio=xxx), DO NOT grant master session
+      if (isPublicStandalone) {
+        return null;
       }
       const defaultUser: AuthSessionUser = {
         username: 'master',
@@ -906,12 +940,7 @@ function MainApp() {
       localStorage.setItem('alf_auth_user', JSON.stringify(defaultUser));
       return defaultUser;
     } catch (_) {
-      return {
-        username: 'master',
-        name: 'Allan Fassa (Master)',
-        role: 'master',
-        token: `master_token_default`
-      };
+      return null;
     }
   });
 
@@ -1158,7 +1187,7 @@ function MainApp() {
     ]);
   };
 
-  // Load initial demo leads on mount from Firestore & Local Cache
+  // Load initial demo leads on mount from Firestore, Backend API & Local Cache
   useEffect(() => {
     // 1. Carregamento imediato do cache local para resposta instantânea mesmo offline ou após F5
     try {
@@ -1168,10 +1197,28 @@ function MainApp() {
         if (Array.isArray(parsed) && parsed.length > 0) {
           activeSearchResultsRef.current = parsed;
           setLeads(parsed);
-          setSelectedLead(parsed[0]);
         }
       }
     } catch (_) {}
+
+    // 1b. Sincronização complementar via API Backend (garante funcionamento mesmo com bloqueadores de rede no Desktop/Mobile)
+    fetch('/api/leads')
+      .then(r => r.json())
+      .then(data => {
+        if (data?.success && Array.isArray(data.leads) && data.leads.length > 0) {
+          setLeads(prev => {
+            const existingIds = new Set(prev.map(l => l.id));
+            const additional = data.leads.filter((l: Lead) => l && l.id && !existingIds.has(l.id));
+            if (additional.length === 0 && prev.length > 0) return prev;
+            const merged = [...prev, ...additional];
+            try {
+              localStorage.setItem('alf_local_crm_leads', JSON.stringify(merged));
+            } catch (_) {}
+            return merged;
+          });
+        }
+      })
+      .catch(() => {});
 
     // 2. Sincronização em tempo real com o Firestore
     const unsubscribe = onSnapshot(collection(db, 'leads'), (snapshot) => {
@@ -1195,11 +1242,11 @@ function MainApp() {
           } catch (_) {}
           return merged;
         });
-        // Keep the selectedLead synchronized
+        // Keep the selectedLead synchronized ONLY if a lead was already selected by the user
         setSelectedLead(prev => {
-          if (!prev) return loadedLeads[0] || null;
+          if (!prev) return null;
           const current = loadedLeads.find(l => l.id === prev.id) || (activeSearchResultsRef.current || []).find(l => l.id === prev.id);
-          return current || loadedLeads[0] || null;
+          return current || prev;
         });
       }
     }, (error) => {
@@ -1917,6 +1964,12 @@ function MainApp() {
   const updateLeadStage = async (leadId: string, newStage: Lead['stage']) => {
     const targetLead = leads.find(l => l.id === leadId);
     if (targetLead) {
+      setRecentlyMovedLeadId(leadId);
+      setActiveQuickStageLeadId(null);
+      setTimeout(() => {
+        setRecentlyMovedLeadId(curr => (curr === leadId ? null : curr));
+      }, 2400);
+
       const updated = { ...targetLead, stage: newStage };
       
       // Clean any undefined or null properties to prevent Firestore serialization errors
@@ -1936,9 +1989,15 @@ function MainApp() {
       if (!cleaned.id) cleaned.id = leadId;
 
       try {
-        await setDoc(doc(db, 'leads', leadId), cleaned);
+        setLeads(prev => prev.map(l => l.id === leadId ? cleaned : l));
         if (selectedLead?.id === leadId) setSelectedLead(cleaned);
         if (loggedInClient?.id === leadId) setLoggedInClient(cleaned);
+        fetch('/api/leads/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lead: cleaned })
+        }).catch(() => {});
+        await setDoc(doc(db, 'leads', leadId), cleaned);
       } catch (error) {
         handleFirestoreError(error, OperationType.WRITE, `leads/${leadId}`);
       }
@@ -1947,32 +2006,59 @@ function MainApp() {
 
   const updateLeadDetails = async (leadId: string, updates: Partial<Lead>) => {
     const targetLead = leads.find(l => l.id === leadId);
-    if (targetLead) {
-      const updated = { ...targetLead, ...updates };
-      
-      // Clean any undefined or null properties to prevent Firestore serialization errors
-      const cleaned: any = {};
-      Object.keys(updated).forEach((key) => {
-        const val = (updated as any)[key];
-        if (val !== undefined && val !== null) {
-          cleaned[key] = val;
-        }
-      });
-      
-      // Ensure key firestore.rules requirements are met
-      if (!cleaned.stage) cleaned.stage = 'new';
-      if (!cleaned.city) cleaned.city = 'Desconhecido';
-      if (!cleaned.niche) cleaned.niche = 'Geral';
-      if (!cleaned.name) cleaned.name = 'Empresa Sem Nome';
-      if (!cleaned.id) cleaned.id = leadId;
+    const baseLead: Lead = targetLead || {
+      id: leadId,
+      name: updates.name || 'Nova Empresa',
+      niche: updates.niche || 'Comércio Local',
+      city: updates.city || 'Brasil',
+      address: updates.address || '',
+      phone: updates.phone || '',
+      rating: 5.0,
+      reviewCount: 10,
+      hasWebsite: true,
+      websiteUrl: null,
+      googleMapsUrl: updates.googleMapsUrl || 'https://maps.google.com',
+      weakness: 'Mini-Site & Placa NFC',
+      stage: 'won'
+    };
 
-      try {
-        await setDoc(doc(db, 'leads', leadId), cleaned);
-        if (selectedLead?.id === leadId) setSelectedLead(cleaned);
-        if (loggedInClient?.id === leadId) setLoggedInClient(cleaned);
-      } catch (error) {
-        handleFirestoreError(error, OperationType.WRITE, `leads/${leadId}`);
+    const updated = { ...baseLead, ...updates };
+    
+    // Clean any undefined or null properties to prevent Firestore serialization errors
+    const cleaned: any = {};
+    Object.keys(updated).forEach((key) => {
+      const val = (updated as any)[key];
+      if (val !== undefined && val !== null) {
+        cleaned[key] = val;
       }
+    });
+    
+    // Ensure key firestore.rules requirements are met
+    if (!cleaned.stage) cleaned.stage = 'new';
+    if (!cleaned.city) cleaned.city = 'Brasil';
+    if (!cleaned.niche) cleaned.niche = 'Geral';
+    if (!cleaned.name) cleaned.name = 'Empresa Sem Nome';
+    if (!cleaned.id) cleaned.id = leadId;
+
+    try {
+      setLeads(prev => {
+        const exists = prev.some(l => l.id === leadId);
+        const nextList = exists ? prev.map(l => l.id === leadId ? cleaned : l) : [cleaned, ...prev];
+        try {
+          localStorage.setItem('alf_local_crm_leads', JSON.stringify(nextList));
+        } catch (_) {}
+        return nextList;
+      });
+      if (!selectedLead || selectedLead.id === leadId) setSelectedLead(cleaned);
+      if (loggedInClient?.id === leadId) setLoggedInClient(cleaned);
+      fetch('/api/leads/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lead: cleaned })
+      }).catch(() => {});
+      await setDoc(doc(db, 'leads', leadId), cleaned, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `leads/${leadId}`);
     }
   };
 
@@ -2022,6 +2108,12 @@ function MainApp() {
     };
 
     try {
+      setLeads(prev => [newLead, ...prev]);
+      fetch('/api/leads/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lead: newLead })
+      }).catch(() => {});
       await setDoc(doc(db, 'leads', cleanId), newLead);
       setAdminSelectedLeadId(cleanId);
       setIsAddAccountOpen(false);
@@ -2172,7 +2264,21 @@ function MainApp() {
 
   // Drag and drop or Click-to-move CRM Pipeline stages
   const getLeadsByStage = (stage: Lead['stage']) => {
-    return leads.filter(l => l.stage === stage);
+    return leads.filter(l => {
+      if (crmSearchQuery.trim()) {
+        const q = crmSearchQuery.toLowerCase().trim();
+        const matchesQuery =
+          (l.name && l.name.toLowerCase().includes(q)) ||
+          (l.niche && l.niche.toLowerCase().includes(q)) ||
+          (l.city && l.city.toLowerCase().includes(q)) ||
+          (l.phone && l.phone.toLowerCase().includes(q));
+        if (!matchesQuery) return false;
+      }
+      if (stage === 'to_contact') {
+        return l.stage === 'to_contact' || l.stage === 'new' || !l.stage;
+      }
+      return l.stage === stage;
+    });
   };
 
   // Pitch actions
@@ -2286,16 +2392,16 @@ function MainApp() {
     },
     {
       id: 'site_preview' as const,
-      label: 'Site Demonstrativo',
-      shortLabel: 'Site Demo',
+      label: 'Mini-Site, Logo & Serviços',
+      shortLabel: 'Mini-Site',
       navGroup: 'comercial',
-      category: 'Demonstração com IA',
-      title: 'Simulador Interativo de Mini-Site com IA',
-      description: 'Demonstração de landing page moderna para o lojista com WhatsApp, catálogo e avaliações',
+      category: 'Criador de Mini-Site & Logo',
+      title: 'Criador de Mini-Site, Logotipo & Catálogo de Serviços',
+      description: 'Suba o logotipo do cliente, cadastre serviços com botão de WhatsApp, Pix, Wi-Fi e Google Reviews',
       icon: Globe,
       color: 'text-teal-600',
       bgColor: 'bg-teal-50',
-      badge: null,
+      badge: 'Logo & IA',
       requiresMaster: false,
     },
     {
@@ -2342,8 +2448,30 @@ function MainApp() {
     },
   ];
 
-  // All professional navigation modules visible and accessible
-  const navTabsList = allNavTabsList;
+  // Filter navigation modules based on user allowedTabs when configured (Master always sees all)
+  const navTabsList = (() => {
+    const userObj = currentUser as any;
+    if (!userObj || userObj.role === 'master' || isMasterAuthenticated) {
+      return allNavTabsList;
+    }
+    const allowed: string[] | undefined = Array.isArray(userObj.allowedTabs)
+      ? userObj.allowedTabs
+      : undefined;
+    if (!allowed || allowed.length === 0) {
+      return allNavTabsList;
+    }
+    const expandedAllowed = new Set<string>(allowed);
+    if (expandedAllowed.has('totem_config') || expandedAllowed.has('overview')) {
+      expandedAllowed.add('dynamic_qr');
+      expandedAllowed.add('cardapio');
+    }
+    if (expandedAllowed.has('sales_pitch') || expandedAllowed.has('ads')) {
+      expandedAllowed.add('landing');
+      expandedAllowed.add('calculator');
+      expandedAllowed.add('crm');
+    }
+    return allNavTabsList.filter((tab) => expandedAllowed.has(tab.id));
+  })();
 
   const activeTabMeta = allNavTabsList.find(t => t.id === activeTab) || allNavTabsList[0];
 
@@ -2364,28 +2492,31 @@ function MainApp() {
   // Standalone public Mini Site viewer when ?minisite=xxx is in URL
   if (minisiteParam) {
     const targetLead = leads.find(l => l.id === minisiteParam) || (selectedLead?.id === minisiteParam ? selectedLead : null);
+    const savedMini = (targetLead as any)?.miniSiteConfig || {};
     const standaloneConfig: MiniSiteConfig = {
       id: minisiteParam,
-      companyName: targetLead?.name || 'Sua Empresa',
-      niche: targetLead?.niche || 'Atendimento Exclusivo',
-      city: targetLead?.city || 'Brasil',
-      tagline: targetLead?.weakness
+      companyName: savedMini.companyName || targetLead?.name || 'Sua Empresa',
+      niche: savedMini.niche || targetLead?.niche || 'Atendimento Exclusivo',
+      city: savedMini.city || targetLead?.city || 'Brasil',
+      tagline: savedMini.tagline || (targetLead?.weakness
         ? `Excelência e agilidade no atendimento em ${targetLead.city}`
-        : 'Atendimento de alta qualidade, confiabilidade e rapidez.',
-      whatsappNumber: targetLead?.nfcWhatsappNum || targetLead?.phone || '',
-      whatsappMessage: targetLead?.nfcWhatsappMsg || `Olá! Vim através do Mini Site de ${targetLead?.name || 'sua empresa'} e gostaria de atendimento.`,
-      instagramUrl: targetLead?.nfcInstagramUrl || '',
-      googleReviewUrl: targetLead?.googleMapsUrl || gmbReviewLink || 'https://maps.google.com',
-      websiteUrl: targetLead?.websiteUrl || '',
-      pixKey: (targetLead as any)?.miniSiteConfig?.pixKey || (targetLead?.phone ? formatMiniSitePhone(targetLead.phone) : 'pix@empresa.com.br'),
-      pixBeneficiary: targetLead?.name || 'Empresa Local',
-      pixKeyType: 'telefone',
-      wifiSsid: (targetLead as any)?.miniSiteConfig?.wifiSsid || `${(targetLead?.name || 'Empresa').replace(/\s+/g, '_')}_WiFi`,
-      wifiPassword: (targetLead as any)?.miniSiteConfig?.wifiPassword || 'VisiteNos123',
-      address: (targetLead as any)?.miniSiteConfig?.address || targetLead?.address || '',
-      phone: targetLead?.phone || '',
-      openingHours: (targetLead as any)?.miniSiteConfig?.openingHours || 'Segunda a Sábado: 08h às 19h',
-      theme: 'dark_neon'
+        : 'Atendimento de alta qualidade, confiabilidade e rapidez.'),
+      logoUrl: savedMini.logoUrl || '',
+      whatsappNumber: savedMini.whatsappNumber || targetLead?.nfcWhatsappNum || targetLead?.phone || '',
+      whatsappMessage: savedMini.whatsappMessage || targetLead?.nfcWhatsappMsg || `Olá! Vim através do Mini Site de ${targetLead?.name || 'sua empresa'} e gostaria de atendimento.`,
+      instagramUrl: savedMini.instagramUrl || targetLead?.nfcInstagramUrl || '',
+      googleReviewUrl: savedMini.googleReviewUrl || targetLead?.googleMapsUrl || gmbReviewLink || 'https://maps.google.com',
+      websiteUrl: savedMini.websiteUrl || targetLead?.websiteUrl || '',
+      pixKey: savedMini.pixKey || (targetLead?.phone ? formatMiniSitePhone(targetLead.phone) : 'pix@empresa.com.br'),
+      pixBeneficiary: savedMini.pixBeneficiary || targetLead?.name || 'Empresa Local',
+      pixKeyType: savedMini.pixKeyType || 'telefone',
+      wifiSsid: savedMini.wifiSsid || `${(targetLead?.name || 'Empresa').replace(/\s+/g, '_')}_WiFi`,
+      wifiPassword: savedMini.wifiPassword || 'VisiteNos123',
+      address: savedMini.address || targetLead?.address || '',
+      phone: savedMini.phone || targetLead?.phone || '',
+      openingHours: savedMini.openingHours || 'Segunda a Sábado: 08h às 19h',
+      services: Array.isArray(savedMini.services) ? savedMini.services : [],
+      theme: savedMini.theme || 'dark_neon'
     };
 
     return (
@@ -2395,16 +2526,18 @@ function MainApp() {
           config={standaloneConfig}
           leadId={minisiteParam}
         />
-        {/* Discreet admin exit bar */}
-        <div className="fixed top-3 right-3 z-50">
-          <a
-            href="/"
-            className="px-3 py-1.5 bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white rounded-full text-[11px] font-bold border border-slate-700 backdrop-blur-md shadow-lg transition flex items-center gap-1.5"
-          >
-            <span>Painel ALF</span>
-            <ExternalLink className="w-3 h-3" />
-          </a>
-        </div>
+        {/* Discreet admin exit bar (strictly visible ONLY to logged-in Master or Seller) */}
+        {currentUser && (currentUser.role === 'master' || currentUser.role === 'seller') && (
+          <div className="fixed top-3 right-3 z-50">
+            <a
+              href="/?tab=leads"
+              className="px-3 py-1.5 bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white rounded-full text-[11px] font-bold border border-slate-700 backdrop-blur-md shadow-lg transition flex items-center gap-1.5"
+            >
+              <span>Painel ALF</span>
+              <ExternalLink className="w-3 h-3" />
+            </a>
+          </div>
+        )}
       </div>
     );
   }
@@ -2429,25 +2562,27 @@ function MainApp() {
           menu={targetMenu}
           initialTable={mesaParam}
           onBackToAdmin={() => {
-            window.location.href = '/';
+            window.location.href = '/?tab=leads';
           }}
         />
-        {/* Discreet admin exit button */}
-        <div className="fixed top-3 right-3 z-50">
-          <a
-            href="/"
-            className="px-3 py-1.5 bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white rounded-full text-[11px] font-bold border border-slate-700 backdrop-blur-md shadow-lg transition flex items-center gap-1.5"
-          >
-            <span>Painel ALF</span>
-            <ExternalLink className="w-3 h-3" />
-          </a>
-        </div>
+        {/* Discreet admin exit button (strictly visible ONLY to logged-in Master or Seller) */}
+        {currentUser && (currentUser.role === 'master' || currentUser.role === 'seller') && (
+          <div className="fixed top-3 right-3 z-50">
+            <a
+              href="/?tab=leads"
+              className="px-3 py-1.5 bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white rounded-full text-[11px] font-bold border border-slate-700 backdrop-blur-md shadow-lg transition flex items-center gap-1.5"
+            >
+              <span>Painel ALF</span>
+              <ExternalLink className="w-3 h-3" />
+            </a>
+          </div>
+        )}
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-100/70 text-slate-800 font-sans flex flex-col lg:flex-row antialiased w-full max-w-full overflow-x-hidden">
+    <div className="min-h-screen bg-slate-100/70 text-slate-800 font-sans flex flex-col lg:flex-row antialiased w-full max-w-full overflow-x-clip">
       
       {/* 1. DESKTOP LATERAL SIDEBAR (MENU LATERAL PROFISSIONAL) */}
       <aside 
@@ -2971,12 +3106,12 @@ function MainApp() {
           </div>
         )}
 
-        {/* Mobile Bottom Navigation Dock */}
+        {/* Mobile & Tablet Bottom Navigation Dock */}
         <div 
-          className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/90 shadow-2xl md:hidden px-2 pt-1.5"
+          className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/90 shadow-2xl lg:hidden px-2 pt-1.5"
           style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 6px)' }}
         >
-          <div className="grid grid-cols-5 gap-1 items-center max-w-md mx-auto">
+          <div className="grid grid-cols-5 gap-1 items-center max-w-lg mx-auto">
             <button
               onClick={() => handleNavSelect('dynamic_qr')}
               className={`min-h-[44px] flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all active:scale-95 cursor-pointer ${
@@ -3037,10 +3172,9 @@ function MainApp() {
           </div>
         </div>
 
-      {/* Main Container - Protected against Bottom Dock & Notch / Home Gesture Bar */}
+      {/* Main Container - Responsive spacing across Mobile, Tablet, and Desktop */}
       <main 
-        className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 pb-28 md:pb-8"
-        style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 6rem)' }}
+        className="flex-1 max-w-7xl w-full mx-auto px-3.5 sm:px-6 lg:px-8 py-4 sm:py-5 pb-28 lg:pb-10"
       >
         
         {/* Senior UX Contextual Section Header & Workflow Bar */}
@@ -3335,231 +3469,438 @@ function MainApp() {
               </div>
             </div>
 
-            {/* Kanban Columns */}
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4 overflow-x-auto pb-4">
+            {/* CRM Search & Interactive Controls Header */}
+            <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+              <div className="flex-1 relative">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={crmSearchQuery}
+                  onChange={(e) => setCrmSearchQuery(e.target.value)}
+                  placeholder="Pesquisar empresa, nicho ou telefone no funil..."
+                  className="w-full pl-9 pr-8 py-2 bg-slate-50 hover:bg-slate-100/80 focus:bg-white text-xs border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-blue-500 transition-all text-slate-800"
+                />
+                {crmSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setCrmSearchQuery('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
+                    title="Limpar busca"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 border border-slate-200/80 px-3 py-2 rounded-xl">
+                <Sparkles className="w-4 h-4 text-amber-500 shrink-0 animate-pulse" />
+                <span className="text-[11px] font-medium">
+                  <strong>Arraste os cards</strong> entre as colunas ou use o botão <strong>Mover</strong> para transições suaves com animação física.
+                </span>
+              </div>
+            </div>
+
+            {/* Kanban Columns with Framer Motion Layout Transitions */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 pb-4 items-start">
               
-              {/* STAGE 1: TO CONTACT */}
-              <div className="bg-slate-100 border border-slate-200/60 rounded-2xl p-3 min-w-[240px] flex flex-col h-[520px]">
-                <div className="flex items-center justify-between mb-3 px-1">
-                  <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">A Contatar</span>
-                  <span className="bg-slate-200 text-slate-700 text-xs px-2 py-0.5 rounded-full font-bold">
-                    {getLeadsByStage('to_contact').length}
-                  </span>
-                </div>
+              {/* Pipeline Stages Array */}
+              {[
+                {
+                  id: 'to_contact' as const,
+                  title: 'A Contatar',
+                  subtitle: 'Novos e pendentes',
+                  icon: '📞',
+                  badgeBg: 'bg-slate-200 text-slate-700',
+                  dropHighlight: 'border-blue-500 bg-blue-50/70 ring-2 ring-blue-300',
+                  nextStage: 'contacted' as const,
+                  nextBtnLabel: 'Contatar',
+                  nextBtnClass: 'bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold',
+                },
+                {
+                  id: 'contacted' as const,
+                  title: 'Contatado',
+                  subtitle: 'Apresentação feita',
+                  icon: '💬',
+                  badgeBg: 'bg-blue-100 text-blue-800',
+                  dropHighlight: 'border-blue-500 bg-blue-50/70 ring-2 ring-blue-300',
+                  nextStage: 'proposal' as const,
+                  nextBtnLabel: 'Enviar Proposta',
+                  nextBtnClass: 'bg-blue-600 hover:bg-blue-700 text-white font-bold',
+                },
+                {
+                  id: 'proposal' as const,
+                  title: 'Proposta Enviada',
+                  subtitle: 'Aguardando fechamento',
+                  icon: '📑',
+                  badgeBg: 'bg-indigo-100 text-indigo-800',
+                  dropHighlight: 'border-indigo-500 bg-indigo-50/70 ring-2 ring-indigo-300',
+                  nextStage: 'won' as const,
+                  nextBtnLabel: 'Fechar Venda 🎉',
+                  nextBtnClass: 'bg-emerald-600 hover:bg-emerald-700 text-white font-bold',
+                },
+                {
+                  id: 'won' as const,
+                  title: 'Fechado 🎉',
+                  subtitle: 'Venda confirmada',
+                  icon: '🏆',
+                  badgeBg: 'bg-emerald-100 text-emerald-800',
+                  dropHighlight: 'border-emerald-500 bg-emerald-50/70 ring-2 ring-emerald-300',
+                },
+                {
+                  id: 'lost' as const,
+                  title: 'Recusado',
+                  subtitle: 'Sem interesse no momento',
+                  icon: '⏸️',
+                  badgeBg: 'bg-slate-200 text-slate-600',
+                  dropHighlight: 'border-amber-400 bg-amber-50/70 ring-2 ring-amber-300',
+                  nextStage: 'to_contact' as const,
+                  nextBtnLabel: 'Reativar Lead',
+                  nextBtnClass: 'bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold',
+                }
+              ].map((column) => {
+                const stageLeads = getLeadsByStage(column.id);
+                const isOver = activeDropStage === column.id;
+                const columnTotal = stageLeads.reduce((acc, curr) => acc + (curr.saleValue || nfcPrice || 149), 0);
 
-                <div className="space-y-3 flex-1 overflow-y-auto">
-                  {getLeadsByStage('to_contact').map(lead => (
-                    <div key={lead.id} className="bg-white border border-slate-200 rounded-xl p-3 shadow-xs space-y-2 hover:border-blue-400 transition-all">
-                      <h4 className="font-bold text-xs text-slate-900 leading-tight">{lead.name}</h4>
-                      <div className="flex justify-between items-center text-[10px] text-slate-400">
-                        <span>{lead.niche}</span>
-                        <span className="font-semibold text-slate-700">R$ {lead.saleValue}</span>
-                      </div>
-                      {lead.nextFollowUp && (
-                        <div className="flex items-center gap-1 text-[9px] font-bold text-blue-800 bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded-sm w-fit">
-                          📅 F/U: {lead.nextFollowUp.split('-').reverse().join('/')}
+                return (
+                  <div
+                    key={column.id}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = 'move';
+                      if (activeDropStage !== column.id) {
+                        setActiveDropStage(column.id);
+                      }
+                    }}
+                    onDragLeave={(e) => {
+                      if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                        if (activeDropStage === column.id) setActiveDropStage(null);
+                      }
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const droppedId = e.dataTransfer.getData('text/plain') || draggedLeadId;
+                      if (droppedId) {
+                        updateLeadStage(droppedId, column.id);
+                      }
+                      setActiveDropStage(null);
+                      setDraggedLeadId(null);
+                    }}
+                    className={`border rounded-2xl p-3 min-w-[240px] flex flex-col h-[620px] transition-all duration-200 ${
+                      isOver
+                        ? column.dropHighlight
+                        : 'bg-slate-100/90 border-slate-200/80 shadow-xs'
+                    }`}
+                  >
+                    {/* Column Header */}
+                    <div className="flex items-center justify-between mb-2.5 px-1 pb-2 border-b border-slate-200/60">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="text-sm select-none">{column.icon}</span>
+                        <div className="min-w-0">
+                          <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider truncate">
+                            {column.title}
+                          </h3>
+                          <span className="text-[10px] text-slate-500 font-medium block">
+                            R$ {columnTotal.toLocaleString('pt-BR', { minimumFractionDigits: 0 })}
+                          </span>
                         </div>
-                      )}
-                      {lead.historyNotes && lead.historyNotes.length > 0 && (
-                        <p className="text-[9px] text-slate-500 italic truncate max-w-full">
-                          📝 {lead.historyNotes[lead.historyNotes.length - 1]}
-                        </p>
-                      )}
-                      <div className="flex gap-1 pt-1.5 border-t border-slate-100">
-                        <button
-                          onClick={() => updateLeadStage(lead.id, 'contacted')}
-                          className="flex-1 py-1 text-center bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-md text-[10px]"
-                        >
-                          Contatar
-                        </button>
-                        <button
-                          onClick={() => {
-                            requireMasterAccess('site_preview', () => {
-                              setSelectedLead(lead);
-                              generateWebsiteTemplate(lead);
-                            });
-                          }}
-                          className="px-2 py-1 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-md text-[10px] flex items-center gap-0.5"
-                          title="Gerar Site de Modelo (Requer Master)"
-                        >
-                          <span>Site</span>
-                          {!isMasterAuthenticated && <Lock className="h-2 w-2 text-amber-500" />}
-                        </button>
                       </div>
+
+                      <motion.span
+                        key={stageLeads.length}
+                        initial={{ scale: 1.25 }}
+                        animate={{ scale: 1 }}
+                        transition={{ type: "spring", stiffness: 500, damping: 25 }}
+                        className={`${column.badgeBg} text-xs px-2.5 py-0.5 rounded-full font-bold shadow-2xs`}
+                      >
+                        {stageLeads.length}
+                      </motion.span>
                     </div>
-                  ))}
-                </div>
-              </div>
 
-              {/* STAGE 2: CONTACTED */}
-              <div className="bg-slate-100 border border-slate-200/60 rounded-2xl p-3 min-w-[240px] flex flex-col h-[520px]">
-                <div className="flex items-center justify-between mb-3 px-1">
-                  <span className="text-xs font-bold text-slate-700 uppercase tracking-wider text-blue-700">Contatado</span>
-                  <span className="bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded-full font-bold">
-                    {getLeadsByStage('contacted').length}
-                  </span>
-                </div>
+                    {/* Active Drag Over Indicator */}
+                    <AnimatePresence>
+                      {isOver && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0, scale: 0.95 }}
+                          animate={{ opacity: 1, height: 'auto', scale: 1 }}
+                          exit={{ opacity: 0, height: 0, scale: 0.95 }}
+                          transition={{ duration: 0.15 }}
+                          className="mb-2 p-2 rounded-xl border-2 border-dashed border-blue-500 bg-white/90 text-blue-700 text-[11px] font-bold text-center flex items-center justify-center gap-1.5 shadow-xs"
+                        >
+                          <Sparkles className="w-3 h-3 text-blue-600 animate-spin" />
+                          <span>Solte para {column.title}</span>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
 
-                <div className="space-y-3 flex-1 overflow-y-auto">
-                  {getLeadsByStage('contacted').map(lead => (
-                    <div key={lead.id} className="bg-white border border-slate-200 rounded-xl p-3 shadow-xs space-y-2 hover:border-blue-400 transition-all">
-                      <h4 className="font-bold text-xs text-slate-900 leading-tight">{lead.name}</h4>
-                      <p className="text-[10px] text-amber-600 font-semibold leading-tight">💬 {lead.weakness}</p>
-                      <div className="flex justify-between items-center text-[10px] text-slate-400">
-                        <span>{lead.phone}</span>
-                        <span className="font-semibold text-slate-700">R$ {lead.saleValue}</span>
-                      </div>
-                      {lead.nextFollowUp && (
-                        <div className="flex items-center gap-1 text-[9px] font-bold text-blue-800 bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded-sm w-fit">
-                          📅 F/U: {lead.nextFollowUp.split('-').reverse().join('/')}
-                        </div>
-                      )}
-                      {lead.historyNotes && lead.historyNotes.length > 0 && (
-                        <p className="text-[9px] text-slate-500 italic truncate max-w-full">
-                          📝 {lead.historyNotes[lead.historyNotes.length - 1]}
-                        </p>
-                      )}
-                      <div className="flex gap-1 pt-1.5 border-t border-slate-100">
-                        <button
-                          onClick={() => updateLeadStage(lead.id, 'proposal')}
-                          className="flex-1 py-1 text-center bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-md text-[10px]"
-                        >
-                          Enviar Proposta
-                        </button>
-                        <a
-                          href={getWhatsAppLink(lead)}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-md text-[10px] flex items-center justify-center"
-                          title="Conversar no WhatsApp"
-                        >
-                          <MessageSquare className="h-3.5 w-3.5" />
-                        </a>
-                      </div>
+                    {/* Cards Container with Framer Motion AnimatePresence */}
+                    <div className="space-y-3 flex-1 overflow-y-auto pr-1">
+                      <AnimatePresence mode="popLayout">
+                        {stageLeads.length === 0 ? (
+                          <motion.div
+                            key={`empty-${column.id}`}
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.9 }}
+                            transition={{ duration: 0.2 }}
+                            className="flex flex-col items-center justify-center h-44 rounded-xl border border-dashed border-slate-300/80 p-4 text-center text-slate-400 bg-white/50"
+                          >
+                            <span className="text-2xl mb-1 opacity-50 select-none">{column.icon}</span>
+                            <span className="text-xs font-semibold text-slate-500">Nenhum lead</span>
+                            <span className="text-[10px] text-slate-400 mt-0.5">Arraste um card para cá</span>
+                          </motion.div>
+                        ) : (
+                          stageLeads.map((lead) => {
+                            const isRecentlyMoved = recentlyMovedLeadId === lead.id;
+                            const isQuickStageOpen = activeQuickStageLeadId === lead.id;
+
+                            return (
+                              <motion.div
+                                key={lead.id}
+                                layout
+                                layoutId={`crm-card-${lead.id}`}
+                                initial={{ opacity: 0, scale: 0.88, y: 15 }}
+                                animate={{
+                                  opacity: 1,
+                                  scale: 1,
+                                  y: 0,
+                                  transition: {
+                                    type: "spring",
+                                    stiffness: 380,
+                                    damping: 28,
+                                    mass: 0.7
+                                  }
+                                }}
+                                exit={{
+                                  opacity: 0,
+                                  scale: 0.82,
+                                  y: -12,
+                                  transition: { duration: 0.2, ease: "easeOut" }
+                                }}
+                                whileHover={{
+                                  y: -3,
+                                  scale: 1.015,
+                                  boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04)"
+                                }}
+                                whileTap={{ scale: 0.98 }}
+                                draggable
+                                onDragStart={(e) => {
+                                  (e as any).dataTransfer.setData('text/plain', lead.id);
+                                  (e as any).dataTransfer.effectAllowed = 'move';
+                                  setDraggedLeadId(lead.id);
+                                }}
+                                onDragEnd={() => {
+                                  setDraggedLeadId(null);
+                                  setActiveDropStage(null);
+                                }}
+                                className={`bg-white border rounded-xl p-3 shadow-xs space-y-2.5 transition-colors cursor-grab active:cursor-grabbing relative select-none group ${
+                                  isRecentlyMoved
+                                    ? 'ring-2 ring-blue-500 border-blue-400 bg-blue-50/20'
+                                    : column.id === 'won'
+                                    ? 'border-emerald-300'
+                                    : column.id === 'lost'
+                                    ? 'border-slate-200 opacity-75 hover:opacity-100'
+                                    : 'border-slate-200 hover:border-blue-400'
+                                }`}
+                              >
+                                {/* Feedback badge on recent move */}
+                                <AnimatePresence>
+                                  {isRecentlyMoved && (
+                                    <motion.div
+                                      initial={{ scale: 0.7, opacity: 0, y: -4 }}
+                                      animate={{ scale: 1, opacity: 1, y: 0 }}
+                                      exit={{ scale: 0.7, opacity: 0 }}
+                                      transition={{ type: "spring", stiffness: 500, damping: 25 }}
+                                      className="absolute -top-2.5 right-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full shadow-md flex items-center gap-1 z-20 border border-white"
+                                    >
+                                      <Sparkles className="w-2.5 h-2.5 animate-pulse" />
+                                      <span>Movido!</span>
+                                    </motion.div>
+                                  )}
+                                </AnimatePresence>
+
+                                {/* Top Title & Drag Handle */}
+                                <div className="flex items-start justify-between gap-1.5">
+                                  <div className="flex items-center gap-1 min-w-0 flex-1">
+                                    <span title="Arraste para mover" className="shrink-0 flex items-center">
+                                      <GripVertical className="w-3.5 h-3.5 text-slate-300 group-hover:text-slate-500 cursor-grab" />
+                                    </span>
+                                    <h4 className="font-bold text-xs text-slate-900 leading-snug line-clamp-2">
+                                      {lead.name}
+                                    </h4>
+                                  </div>
+
+                                  {column.id === 'won' && (
+                                    <span className="bg-emerald-500 text-white text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-md shrink-0">
+                                      PAGO
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Details / Weakness */}
+                                {lead.weakness && column.id === 'contacted' && (
+                                  <p className="text-[10px] text-amber-600 font-semibold leading-tight line-clamp-2 bg-amber-50/70 p-1 rounded-md">
+                                    💬 {lead.weakness}
+                                  </p>
+                                )}
+
+                                <div className="flex justify-between items-center text-[10px] text-slate-500">
+                                  <span className="truncate max-w-[120px]">{lead.niche || lead.productType?.toUpperCase() || 'Comércio Local'}</span>
+                                  <span className="font-bold text-slate-800 shrink-0">
+                                    R$ {lead.saleValue || nfcPrice || 149}
+                                  </span>
+                                </div>
+
+                                {lead.nextFollowUp && (
+                                  <div className="flex items-center gap-1 text-[9px] font-bold text-blue-800 bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded-md w-fit">
+                                    📅 F/U: {lead.nextFollowUp.split('-').reverse().join('/')}
+                                  </div>
+                                )}
+
+                                {lead.historyNotes && lead.historyNotes.length > 0 && (
+                                  <p className="text-[9px] text-slate-500 italic truncate max-w-full">
+                                    📝 {lead.historyNotes[lead.historyNotes.length - 1]}
+                                  </p>
+                                )}
+
+                                {/* Quick Stage Jumper Popover Menu */}
+                                <AnimatePresence>
+                                  {isQuickStageOpen && (
+                                    <motion.div
+                                      initial={{ opacity: 0, height: 0, scale: 0.95 }}
+                                      animate={{ opacity: 1, height: 'auto', scale: 1 }}
+                                      exit={{ opacity: 0, height: 0, scale: 0.95 }}
+                                      transition={{ duration: 0.15 }}
+                                      className="p-1.5 bg-slate-50 border border-slate-200 rounded-lg space-y-1"
+                                    >
+                                      <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block px-1">
+                                        Mover diretamente para:
+                                      </span>
+                                      <div className="grid grid-cols-2 gap-1">
+                                        {[
+                                          { s: 'to_contact' as const, label: '📞 A Contatar' },
+                                          { s: 'contacted' as const, label: '💬 Contatado' },
+                                          { s: 'proposal' as const, label: '📑 Proposta' },
+                                          { s: 'won' as const, label: '🏆 Fechado' },
+                                          { s: 'lost' as const, label: '⏸️ Recusado' }
+                                        ].map(target => (
+                                          <button
+                                            key={target.s}
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              updateLeadStage(lead.id, target.s);
+                                            }}
+                                            className={`text-[9px] px-1.5 py-1 rounded text-left font-semibold transition ${
+                                              lead.stage === target.s
+                                                ? 'bg-blue-600 text-white'
+                                                : 'bg-white hover:bg-slate-200 text-slate-700 border border-slate-200'
+                                            }`}
+                                          >
+                                            {target.label}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </motion.div>
+                                  )}
+                                </AnimatePresence>
+
+                                {/* Action Buttons Row */}
+                                <div className="flex items-center gap-1 pt-1.5 border-t border-slate-100">
+                                  {/* Next Stage Primary Action Button */}
+                                  {column.nextStage && column.nextBtnLabel && (
+                                    <button
+                                      type="button"
+                                      onClick={() => updateLeadStage(lead.id, column.nextStage!)}
+                                      className={`flex-1 py-1 px-2 text-center rounded-md text-[10px] transition cursor-pointer ${column.nextBtnClass}`}
+                                    >
+                                      {column.nextBtnLabel}
+                                    </button>
+                                  )}
+
+                                  {/* In Proposal column: also give Lost button */}
+                                  {column.id === 'proposal' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => updateLeadStage(lead.id, 'lost')}
+                                      className="px-2 py-1 bg-slate-50 hover:bg-slate-100 text-slate-500 rounded-md text-[10px] cursor-pointer"
+                                      title="Marcar como Recusado"
+                                    >
+                                      Perdido
+                                    </button>
+                                  )}
+
+                                  {/* In Won column: Site Configuration button */}
+                                  {column.id === 'won' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        requireMasterAccess('site_preview', () => {
+                                          setSelectedLead(lead);
+                                          generateWebsiteTemplate(lead);
+                                        });
+                                      }}
+                                      className="flex-1 py-1 text-center bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-md text-[10px] flex items-center justify-center gap-1 cursor-pointer"
+                                    >
+                                      <span>Configurar Site</span>
+                                      {!isMasterAuthenticated && <Lock className="h-2.5 w-2.5 text-amber-400" />}
+                                    </button>
+                                  )}
+
+                                  {/* Quick Stage Mover Selector Toggle */}
+                                  <button
+                                    type="button"
+                                    onClick={() => setActiveQuickStageLeadId(isQuickStageOpen ? null : lead.id)}
+                                    className={`px-1.5 py-1 rounded-md text-[10px] border transition cursor-pointer ${
+                                      isQuickStageOpen
+                                        ? 'bg-blue-100 text-blue-700 border-blue-300'
+                                        : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200'
+                                    }`}
+                                    title="Mover para qualquer etapa"
+                                  >
+                                    Etapa ▾
+                                  </button>
+
+                                  {/* WhatsApp quick contact */}
+                                  {lead.phone && (
+                                    <a
+                                      href={getWhatsAppLink(lead)}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="px-1.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-md text-[10px] flex items-center justify-center"
+                                      title="Conversar no WhatsApp"
+                                    >
+                                      <MessageSquare className="h-3 w-3" />
+                                    </a>
+                                  )}
+
+                                  {/* Site preview button in to_contact */}
+                                  {column.id === 'to_contact' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        requireMasterAccess('site_preview', () => {
+                                          setSelectedLead(lead);
+                                          generateWebsiteTemplate(lead);
+                                        });
+                                      }}
+                                      className="px-1.5 py-1 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-md text-[10px] flex items-center gap-0.5 cursor-pointer"
+                                      title="Gerar Site de Modelo (Requer Master)"
+                                    >
+                                      <span>Site</span>
+                                      {!isMasterAuthenticated && <Lock className="h-2 w-2 text-amber-500" />}
+                                    </button>
+                                  )}
+                                </div>
+                              </motion.div>
+                            );
+                          })
+                        )}
+                      </AnimatePresence>
                     </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* STAGE 3: PROPOSAL */}
-              <div className="bg-slate-100 border border-slate-200/60 rounded-2xl p-3 min-w-[240px] flex flex-col h-[520px]">
-                <div className="flex items-center justify-between mb-3 px-1">
-                  <span className="text-xs font-bold text-slate-700 uppercase tracking-wider text-indigo-700">Proposta Enviada</span>
-                  <span className="bg-indigo-100 text-indigo-800 text-xs px-2 py-0.5 rounded-full font-bold">
-                    {getLeadsByStage('proposal').length}
-                  </span>
-                </div>
-
-                <div className="space-y-3 flex-1 overflow-y-auto">
-                  {getLeadsByStage('proposal').map(lead => (
-                    <div key={lead.id} className="bg-white border border-slate-200 rounded-xl p-3 shadow-xs space-y-2 hover:border-blue-400 transition-all">
-                      <h4 className="font-bold text-xs text-slate-900 leading-tight">{lead.name}</h4>
-                      <div className="flex justify-between items-center text-[10px] text-slate-400">
-                        <span>{lead.productType?.toUpperCase()}</span>
-                        <span className="font-semibold text-slate-700">R$ {lead.saleValue}</span>
-                      </div>
-                      {lead.nextFollowUp && (
-                        <div className="flex items-center gap-1 text-[9px] font-bold text-blue-800 bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded-sm w-fit">
-                          📅 F/U: {lead.nextFollowUp.split('-').reverse().join('/')}
-                        </div>
-                      )}
-                      {lead.historyNotes && lead.historyNotes.length > 0 && (
-                        <p className="text-[9px] text-slate-500 italic truncate max-w-full">
-                          📝 {lead.historyNotes[lead.historyNotes.length - 1]}
-                        </p>
-                      )}
-                      <div className="flex gap-1 pt-1.5 border-t border-slate-100">
-                        <button
-                          onClick={() => updateLeadStage(lead.id, 'won')}
-                          className="flex-1 py-1 text-center bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-md text-[10px]"
-                        >
-                          Fechar Venda 🎉
-                        </button>
-                        <button
-                          onClick={() => updateLeadStage(lead.id, 'lost')}
-                          className="px-2 py-1 bg-slate-50 hover:bg-slate-100 text-slate-500 rounded-md text-[10px]"
-                          title="Recusada"
-                        >
-                          Perdido
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* STAGE 4: WON */}
-              <div className="bg-slate-100 border border-slate-200/60 rounded-2xl p-3 min-w-[240px] flex flex-col h-[520px]">
-                <div className="flex items-center justify-between mb-3 px-1">
-                  <span className="text-xs font-bold text-slate-700 uppercase tracking-wider text-emerald-700">Fechado 🎉</span>
-                  <span className="bg-emerald-100 text-emerald-800 text-xs px-2 py-0.5 rounded-full font-bold">
-                    {getLeadsByStage('won').length}
-                  </span>
-                </div>
-
-                <div className="space-y-3 flex-1 overflow-y-auto">
-                  {getLeadsByStage('won').map(lead => (
-                    <div key={lead.id} className="bg-white border border-emerald-300 rounded-xl p-3 shadow-xs space-y-2 relative overflow-hidden">
-                      <div className="absolute right-0 top-0 bg-emerald-500 text-white text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-bl-lg">PAGO</div>
-                      <h4 className="font-bold text-xs text-slate-900 leading-tight pr-6">{lead.name}</h4>
-                      <div className="flex justify-between items-center text-[10px]">
-                        <span className="text-emerald-700 font-semibold">{lead.productType?.toUpperCase()}</span>
-                        <span className="font-bold text-slate-800">R$ {lead.saleValue}</span>
-                      </div>
-                      {lead.nextFollowUp && (
-                        <div className="flex items-center gap-1 text-[9px] font-bold text-blue-800 bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded-sm w-fit">
-                          📅 F/U: {lead.nextFollowUp.split('-').reverse().join('/')}
-                        </div>
-                      )}
-                      {lead.historyNotes && lead.historyNotes.length > 0 && (
-                        <p className="text-[9px] text-slate-500 italic truncate max-w-full">
-                          📝 {lead.historyNotes[lead.historyNotes.length - 1]}
-                        </p>
-                      )}
-                      <div className="flex gap-1 pt-1.5 border-t border-slate-100">
-                        <button
-                          onClick={() => {
-                            requireMasterAccess('site_preview', () => {
-                              setSelectedLead(lead);
-                              generateWebsiteTemplate(lead);
-                            });
-                          }}
-                          className="flex-1 py-1 text-center bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-md text-[10px] flex items-center justify-center gap-1"
-                        >
-                          <span>Configurar Site</span>
-                          {!isMasterAuthenticated && <Lock className="h-2.5 w-2.5 text-amber-400" />}
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* STAGE 5: LOST */}
-              <div className="bg-slate-100 border border-slate-200/60 rounded-2xl p-3 min-w-[240px] flex flex-col h-[520px]">
-                <div className="flex items-center justify-between mb-3 px-1">
-                  <span className="text-xs font-bold text-slate-700 uppercase tracking-wider text-slate-500">Recusado</span>
-                  <span className="bg-slate-200 text-slate-600 text-xs px-2 py-0.5 rounded-full font-bold">
-                    {getLeadsByStage('lost').length}
-                  </span>
-                </div>
-
-                <div className="space-y-3 flex-1 overflow-y-auto">
-                  {getLeadsByStage('lost').map(lead => (
-                    <div key={lead.id} className="bg-white border border-slate-200 rounded-xl p-3 shadow-xs space-y-2 opacity-65">
-                      <h4 className="font-bold text-xs text-slate-500 leading-tight">{lead.name}</h4>
-                      <div className="flex gap-1 justify-end pt-1">
-                        <button
-                          onClick={() => updateLeadStage(lead.id, 'to_contact')}
-                          className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md text-[9px]"
-                        >
-                          Reativar Lead
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
+                  </div>
+                );
+              })}
 
             </div>
 
@@ -3649,67 +3990,87 @@ function MainApp() {
                 {demonstratorMode === 'minisite' ? (
                   <MiniSiteViewer
                     config={{
-                      id: selectedLead?.id || 'demo',
-                      companyName: selectedLead?.name || 'Sua Empresa Aqui',
-                      niche: selectedLead?.niche || niche || 'Negócio Local',
-                      city: selectedLead?.city || city || 'São Paulo',
-                      tagline: selectedLead?.weakness
-                        ? `Atendimento de excelência e soluções rápidas em ${selectedLead.city || 'sua cidade'}`
-                        : 'Atendimento exclusivo, qualidade garantida e agilidade.',
-                      whatsappNumber: selectedLead?.nfcWhatsappNum || selectedLead?.phone || '',
-                      whatsappMessage: selectedLead?.nfcWhatsappMsg || `Olá! Vim através do Mini Site de ${selectedLead?.name || 'sua empresa'} e gostaria de atendimento.`,
-                      instagramUrl: selectedLead?.nfcInstagramUrl || '',
-                      googleReviewUrl: selectedLead?.googleMapsUrl || gmbReviewLink || 'https://maps.google.com',
-                      websiteUrl: selectedLead?.websiteUrl || '',
-                      pixKey: (selectedLead as any)?.miniSiteConfig?.pixKey || (selectedLead?.phone ? selectedLead.phone.replace(/\D/g, '') : 'pix@empresa.com.br'),
-                      pixBeneficiary: selectedLead?.name || 'Empresa Local',
-                      pixKeyType: 'telefone',
-                      wifiSsid: (selectedLead as any)?.miniSiteConfig?.wifiSsid || `${(selectedLead?.name || 'Empresa').replace(/\s+/g, '_')}_WiFi`,
-                      wifiPassword: (selectedLead as any)?.miniSiteConfig?.wifiPassword || 'VisiteNos123',
-                      address: (selectedLead as any)?.miniSiteConfig?.address || selectedLead?.address || '',
-                      phone: selectedLead?.phone || '',
-                      openingHours: (selectedLead as any)?.miniSiteConfig?.openingHours || 'Segunda a Sábado: 08h às 19h',
-                      theme: 'dark_neon'
+                      id: (selectedLead || leads[0])?.id || 'demo',
+                      companyName: (selectedLead || leads[0])?.miniSiteConfig?.companyName || (selectedLead || leads[0])?.name || 'Sua Empresa Aqui',
+                      niche: (selectedLead || leads[0])?.miniSiteConfig?.niche || (selectedLead || leads[0])?.niche || niche || 'Negócio Local',
+                      city: (selectedLead || leads[0])?.miniSiteConfig?.city || (selectedLead || leads[0])?.city || city || 'São Paulo',
+                      tagline: (selectedLead || leads[0])?.miniSiteConfig?.tagline || ((selectedLead || leads[0])?.weakness
+                        ? `Atendimento de excelência e soluções rápidas em ${(selectedLead || leads[0])?.city || 'sua cidade'}`
+                        : 'Atendimento exclusivo, qualidade garantida e agilidade.'),
+                      logoUrl: (selectedLead || leads[0])?.miniSiteConfig?.logoUrl || '',
+                      whatsappNumber: (selectedLead || leads[0])?.miniSiteConfig?.whatsappNumber || (selectedLead || leads[0])?.nfcWhatsappNum || (selectedLead || leads[0])?.phone || '',
+                      whatsappMessage: (selectedLead || leads[0])?.miniSiteConfig?.whatsappMessage || (selectedLead || leads[0])?.nfcWhatsappMsg || `Olá! Vim através do Mini Site de ${(selectedLead || leads[0])?.name || 'sua empresa'} e gostaria de atendimento.`,
+                      instagramUrl: (selectedLead || leads[0])?.miniSiteConfig?.instagramUrl || (selectedLead || leads[0])?.nfcInstagramUrl || '',
+                      googleReviewUrl: (selectedLead || leads[0])?.miniSiteConfig?.googleReviewUrl || (selectedLead || leads[0])?.googleMapsUrl || gmbReviewLink || 'https://maps.google.com',
+                      websiteUrl: (selectedLead || leads[0])?.miniSiteConfig?.websiteUrl || (selectedLead || leads[0])?.websiteUrl || '',
+                      pixKey: (selectedLead || leads[0])?.miniSiteConfig?.pixKey || ((selectedLead || leads[0])?.phone ? (selectedLead || leads[0]).phone.replace(/\D/g, '') : 'pix@empresa.com.br'),
+                      pixBeneficiary: (selectedLead || leads[0])?.miniSiteConfig?.pixBeneficiary || (selectedLead || leads[0])?.name || 'Empresa Local',
+                      pixKeyType: (selectedLead || leads[0])?.miniSiteConfig?.pixKeyType || 'telefone',
+                      wifiSsid: (selectedLead || leads[0])?.miniSiteConfig?.wifiSsid || `${((selectedLead || leads[0])?.name || 'Empresa').replace(/\s+/g, '_')}_WiFi`,
+                      wifiPassword: (selectedLead || leads[0])?.miniSiteConfig?.wifiPassword || 'VisiteNos123',
+                      address: (selectedLead || leads[0])?.miniSiteConfig?.address || (selectedLead || leads[0])?.address || '',
+                      phone: (selectedLead || leads[0])?.miniSiteConfig?.phone || (selectedLead || leads[0])?.phone || '',
+                      openingHours: (selectedLead || leads[0])?.miniSiteConfig?.openingHours || 'Segunda a Sábado: 08h às 19h',
+                      services: Array.isArray((selectedLead || leads[0])?.miniSiteConfig?.services)
+                        ? (selectedLead || leads[0]).miniSiteConfig.services
+                        : [],
+                      theme: (selectedLead || leads[0])?.miniSiteConfig?.theme || 'dark_neon'
                     }}
-                    leadId={selectedLead?.id || 'demo'}
-                    isLinkedToNfc={selectedLead?.nfcRedirectActive === 'minisite'}
+                    leadId={(selectedLead || leads[0])?.id || 'demo'}
+                    isLinkedToNfc={(selectedLead || leads[0])?.nfcRedirectActive === 'minisite'}
                     onLinkToNfc={(vercelUrl) => {
-                      if (selectedLead) {
-                        updateLeadDetails(selectedLead.id, { 
+                      const target = selectedLead || leads[0];
+                      if (target) {
+                        updateLeadDetails(target.id, { 
                           nfcRedirectActive: 'minisite',
                           nfcCustomUrl: vercelUrl || undefined
                         });
-                        alert(`Mini Site de ${selectedLead.name} vinculado com sucesso à Placa NFC! Ao encostar na placa física ou ler o QR Code, este Mini Site ${vercelUrl ? `(${vercelUrl})` : ''} abrirá na hora.`);
                       }
                     }}
+                    onSaveConfig={async (updated) => {
+                      const targetId = (selectedLead || leads[0])?.id || 'empresa-principal';
+                      await updateLeadDetails(targetId, {
+                        name: updated.companyName,
+                        niche: updated.niche,
+                        city: updated.city,
+                        nfcWhatsappNum: updated.whatsappNumber,
+                        nfcWhatsappMsg: updated.whatsappMessage,
+                        nfcInstagramUrl: updated.instagramUrl,
+                        googleMapsUrl: updated.googleReviewUrl,
+                        websiteUrl: updated.websiteUrl,
+                        phone: updated.phone,
+                        address: updated.address,
+                        miniSiteConfig: updated
+                      });
+                    }}
                     onChangeConfig={(updated) => {
-                      if (selectedLead) {
-                        updateLeadDetails(selectedLead.id, {
-                          name: updated.companyName,
-                          niche: updated.niche,
-                          city: updated.city,
-                          nfcWhatsappNum: updated.whatsappNumber,
-                          nfcWhatsappMsg: updated.whatsappMessage,
-                          nfcInstagramUrl: updated.instagramUrl,
-                          googleMapsUrl: updated.googleReviewUrl,
-                          websiteUrl: updated.websiteUrl,
-                          phone: updated.phone || selectedLead.phone,
-                          address: updated.address || selectedLead.address,
-                          miniSiteConfig: {
-                            pixKey: updated.pixKey,
-                            pixBeneficiary: updated.pixBeneficiary,
-                            pixKeyType: updated.pixKeyType,
-                            wifiSsid: updated.wifiSsid,
-                            wifiPassword: updated.wifiPassword,
-                            tagline: updated.tagline,
-                            logoUrl: updated.logoUrl,
-                            theme: updated.theme,
-                            address: updated.address,
-                            phone: updated.phone,
-                            openingHours: updated.openingHours
-                          }
-                        });
-                      }
+                      const targetId = (selectedLead || leads[0])?.id || 'empresa-principal';
+                      updateLeadDetails(targetId, {
+                        name: updated.companyName,
+                        niche: updated.niche,
+                        city: updated.city,
+                        nfcWhatsappNum: updated.whatsappNumber,
+                        nfcWhatsappMsg: updated.whatsappMessage,
+                        nfcInstagramUrl: updated.instagramUrl,
+                        googleMapsUrl: updated.googleReviewUrl,
+                        websiteUrl: updated.websiteUrl,
+                        phone: updated.phone,
+                        address: updated.address,
+                        miniSiteConfig: {
+                          pixKey: updated.pixKey,
+                          pixBeneficiary: updated.pixBeneficiary,
+                          pixKeyType: updated.pixKeyType,
+                          wifiSsid: updated.wifiSsid,
+                          wifiPassword: updated.wifiPassword,
+                          tagline: updated.tagline,
+                          logoUrl: updated.logoUrl,
+                          theme: updated.theme,
+                          address: updated.address,
+                          phone: updated.phone,
+                          openingHours: updated.openingHours,
+                          services: updated.services || []
+                        }
+                      });
                     }}
                   />
                 ) : (
@@ -6414,13 +6775,16 @@ function MainApp() {
         isOpen={isSellerRegisterModalOpen}
         onClose={() => setIsSellerRegisterModalOpen(false)}
         onSuccess={(newUser, token) => {
-          setCurrentUser({
-            token,
-            username: newUser.username,
-            name: newUser.name,
-            role: newUser.role
-          });
-          setActiveTab('dynamic_qr');
+          if (currentUser?.role !== 'master' && !isMasterAuthenticated) {
+            setCurrentUser({
+              token,
+              username: newUser.username,
+              name: newUser.name,
+              role: newUser.role,
+              allowedTabs: newUser.allowedTabs,
+              clientPermissions: newUser.clientPermissions
+            } as any);
+          }
         }}
       />
 

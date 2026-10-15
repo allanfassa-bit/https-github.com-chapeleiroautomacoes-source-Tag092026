@@ -29,7 +29,13 @@ import {
   Code2,
   PackageCheck,
   Eye,
-  X
+  X,
+  Upload,
+  Plus,
+  Trash2,
+  Briefcase,
+  Save,
+  Image as ImageIcon
 } from 'lucide-react';
 import {
   MiniSiteConfig,
@@ -41,7 +47,8 @@ import {
   copyMiniSiteHtmlToClipboard,
   generateClientShareMessage,
   buildMiniSiteWhatsappUrl,
-  sanitizeMiniSiteHandle
+  sanitizeMiniSiteHandle,
+  getDefaultFourProducts
 } from '../utils/miniSiteExporter';
 import {
   cleanClientSlug,
@@ -55,6 +62,7 @@ import { GoogleReviewLinkGenerator } from './GoogleReviewLinkGenerator';
 interface MiniSiteViewerProps {
   config: MiniSiteConfig;
   onChangeConfig?: (updated: MiniSiteConfig) => void;
+  onSaveConfig?: (updated: MiniSiteConfig) => Promise<void> | void;
   standalone?: boolean;
   onLinkToNfc?: (vercelUrl?: string) => void;
   leadId?: string;
@@ -64,12 +72,13 @@ interface MiniSiteViewerProps {
 export const MiniSiteViewer: React.FC<MiniSiteViewerProps> = ({
   config,
   onChangeConfig,
+  onSaveConfig,
   standalone = false,
   onLinkToNfc,
   leadId = 'demo',
   isLinkedToNfc = false
 }) => {
-  const [activeTab, setActiveTab] = useState<'preview' | 'edit' | 'vercel' | 'export'>('preview');
+  const [activeTab, setActiveTab] = useState<'preview' | 'edit' | 'vercel' | 'export'>('edit');
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedPix, setCopiedPix] = useState(false);
   const [copiedWifi, setCopiedWifi] = useState(false);
@@ -85,10 +94,132 @@ export const MiniSiteViewer: React.FC<MiniSiteViewerProps> = ({
   const [activeModal, setActiveModal] = useState<'none' | 'pix' | 'wifi'>('none');
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [newServiceTitle, setNewServiceTitle] = useState('');
+  const [newServicePrice, setNewServicePrice] = useState('');
+  const [newServiceDesc, setNewServiceDesc] = useState('');
+  const [isSavingConfig, setIsSavingConfig] = useState(false);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  const handleLogoFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const maxDim = 260;
+        let w = img.width;
+        let h = img.height;
+        if (w > h && w > maxDim) {
+          h = Math.round((h * maxDim) / w);
+          w = maxDim;
+        } else if (h > maxDim) {
+          w = Math.round((w * maxDim) / h);
+          h = maxDim;
+        }
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, w, h);
+          const dataUrl = canvas.toDataURL('image/png', 0.9);
+          const updated = { ...config, logoUrl: dataUrl };
+          if (onChangeConfig) onChangeConfig(updated);
+          if (onSaveConfig) onSaveConfig(updated);
+          showToast('Logotipo enviado e aplicado ao Mini Site!');
+        }
+      };
+      if (typeof ev.target?.result === 'string') {
+        img.src = ev.target.result;
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleAddService = () => {
+    if (!newServiceTitle.trim()) {
+      showToast('Digite o nome do serviço ou produto.');
+      return;
+    }
+    const currentServices = Array.isArray(config.services) ? config.services : [];
+    const updatedServices = [
+      ...currentServices,
+      {
+        id: `srv_${Date.now()}`,
+        title: newServiceTitle.trim(),
+        price: newServicePrice.trim(),
+        description: newServiceDesc.trim()
+      }
+    ];
+    const updated = { ...config, services: updatedServices };
+    if (onChangeConfig) onChangeConfig(updated);
+    if (onSaveConfig) onSaveConfig(updated);
+    setNewServiceTitle('');
+    setNewServicePrice('');
+    setNewServiceDesc('');
+    showToast('Serviço adicionado ao Mini Site!');
+  };
+
+  const handleRemoveService = (idx: number) => {
+    const currentServices = Array.isArray(config.services) ? config.services : [];
+    const updatedServices = currentServices.filter((_, i) => i !== idx);
+    const updated = { ...config, services: updatedServices };
+    if (onChangeConfig) onChangeConfig(updated);
+    if (onSaveConfig) onSaveConfig(updated);
+  };
+
+  const handleGenerateDefaultServices = () => {
+    const presets = getDefaultFourProducts(config.niche, config.companyName || 'Sua Empresa');
+    const updated = { ...config, services: presets };
+    if (onChangeConfig) onChangeConfig(updated);
+    if (onSaveConfig) onSaveConfig(updated);
+    showToast('4 Destaques do nicho com fotos e WhatsApp gerados com sucesso!');
+  };
+
+  const handleProductImageUpload = (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const maxDim = 400;
+        let w = img.width;
+        let h = img.height;
+        if (w > h && w > maxDim) {
+          h = Math.round((h * maxDim) / w);
+          w = maxDim;
+        } else if (h > maxDim) {
+          w = Math.round((w * maxDim) / h);
+          h = maxDim;
+        }
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, w, h);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+          const currentServices = Array.isArray(config.services) ? [...config.services] : [];
+          if (currentServices[index]) {
+            currentServices[index] = { ...currentServices[index], imageUrl: dataUrl };
+            const updated = { ...config, services: currentServices };
+            if (onChangeConfig) onChangeConfig(updated);
+            if (onSaveConfig) onSaveConfig(updated);
+            showToast(`Foto do produto ${index + 1} atualizada!`);
+          }
+        }
+      };
+      if (typeof ev.target?.result === 'string') {
+        img.src = ev.target.result;
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   const shareableUrl = `${getPublicAppOrigin()}/?minisite=${leadId || config.id || 'demo'}`;
@@ -193,6 +324,18 @@ export const MiniSiteViewer: React.FC<MiniSiteViewerProps> = ({
   const wifiQrData = `WIFI:T:${config.wifiSecurity || 'WPA'};S:${wifiSsid};P:${wifiPass};;`;
   const wifiQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&margin=8&data=${encodeURIComponent(wifiQrData)}`;
 
+  // 4 Main Featured Products & Marquee calculations
+  const userServices = Array.isArray(config.services) ? config.services : [];
+  const defaultServices = getDefaultFourProducts(config.niche, name);
+  const featuredProducts = userServices.length >= 4
+    ? userServices.slice(0, 4)
+    : [
+        ...userServices,
+        ...defaultServices.slice(userServices.length, 4)
+      ];
+  const additionalServices = userServices.length > 4 ? userServices.slice(4) : [];
+  const marqueeText = config.marqueeText || '🔥 NOVIDADES TODA SEMANA • VISITE NOSSA LOJA • ATENDIMENTO VIP • COMPRE PELO WHATSAPP • QUALIDADE GARANTIDA 🔥';
+
   // Interactive phone preview card
   const renderPhoneSimulator = () => (
     <div className="relative mx-auto w-full max-w-[380px] bg-slate-950 rounded-[44px] p-3 shadow-2xl border-4 border-slate-800 ring-1 ring-white/10 select-none">
@@ -203,13 +346,13 @@ export const MiniSiteViewer: React.FC<MiniSiteViewerProps> = ({
       </div>
 
       {/* Screen Body */}
-      <div className="relative rounded-[36px] bg-gradient-to-b from-[#090d16] via-[#0f172a] to-[#030712] text-slate-100 p-5 pt-12 pb-8 overflow-y-auto max-h-[660px] scrollbar-thin scrollbar-thumb-slate-800">
+      <div className="relative rounded-[36px] bg-gradient-to-b from-[#090d16] via-[#0f172a] to-[#030712] text-slate-100 p-4 pt-11 pb-8 overflow-y-auto max-h-[660px] scrollbar-thin scrollbar-thumb-slate-800">
         
         {/* Glow behind profile */}
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-56 h-56 rounded-full bg-sky-500/20 blur-3xl pointer-events-none"></div>
 
-        {/* Profile Header */}
-        <div className="relative z-10 text-center space-y-2 mb-6">
+        {/* 1. Profile Header */}
+        <div className="relative z-10 text-center space-y-2 mb-3">
           <div className="relative w-20 h-20 mx-auto">
             <div className="w-full h-full rounded-2xl bg-gradient-to-tr from-blue-600 via-sky-500 to-indigo-600 flex items-center justify-center text-white text-3xl font-black shadow-lg shadow-sky-500/30 border-2 border-white/20 overflow-hidden">
               {config.logoUrl ? (
@@ -229,7 +372,7 @@ export const MiniSiteViewer: React.FC<MiniSiteViewerProps> = ({
               <Sparkles className="w-3 h-3 text-sky-400" />
               <span>{niche} • {city}</span>
             </div>
-            <p className="text-xs text-slate-400 mt-2 leading-relaxed max-w-[260px] mx-auto">
+            <p className="text-xs text-slate-400 mt-1 leading-relaxed max-w-[260px] mx-auto">
               {config.tagline || `${niche} de excelência em ${city}`}
             </p>
           </div>
@@ -241,68 +384,169 @@ export const MiniSiteViewer: React.FC<MiniSiteViewerProps> = ({
             </div>
           )}
 
-          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-[11px] font-semibold text-emerald-400">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span>Aberto agora • Atendimento Online</span>
+          <div>
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-[10px] font-semibold text-emerald-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span>Aberto agora • Atendimento Online</span>
+            </div>
           </div>
         </div>
 
-        {/* Action Buttons List */}
-        <div className="relative z-10 space-y-2.5">
-          
-          {/* 1. Google Review */}
+        {/* 2. Faixa Dourada Rolante (Marquee Ribbon Banner) */}
+        <div className="relative z-10 w-full overflow-hidden bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 text-slate-950 font-black text-[10px] py-1.5 px-2 rounded-xl shadow-md uppercase tracking-wider mb-3">
+          <div className="whitespace-nowrap animate-marquee flex items-center gap-4">
+            <span>{marqueeText}</span>
+            <span>•</span>
+            <span>{marqueeText}</span>
+          </div>
+        </div>
+
+        {/* 3. 4 Produtos Principais (Grade 2x2 com Fotos e Botões "Chamar no WhatsApp") */}
+        <div className="relative z-10 mb-3 space-y-2">
+          <div className="flex items-center justify-between px-1">
+            <span className="text-[11px] font-black uppercase tracking-wider text-sky-400 flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>4 Principais Destaques</span>
+            </span>
+            <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30">
+              Catálogo 1-Clique
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            {featuredProducts.map((p, idx) => {
+              const pWaMsg = p.customWhatsappMsg || `Olá! Vi no Mini Site de ${name} o destaque "${p.title}"${p.price ? ` (${p.price})` : ''} e gostaria de mais informações!`;
+              const pWaUrl = buildMiniSiteWhatsappUrl(config.whatsappNumber || config.phone || '5511999999999', pWaMsg);
+              return (
+                <div
+                  key={p.id || `feat_${idx}`}
+                  className="bg-white/5 border border-white/10 hover:border-emerald-500/50 rounded-2xl overflow-hidden flex flex-col justify-between transition-all hover:-translate-y-0.5 shadow-md group"
+                >
+                  <div className="relative w-full h-24 bg-slate-900 overflow-hidden">
+                    <img
+                      src={p.imageUrl || 'https://images.unsplash.com/photo-1556742049-0a67e55722c6?auto=format&fit=crop&w=600&q=80'}
+                      alt={p.title}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1556742049-0a67e55722c6?auto=format&fit=crop&w=600&q=80'; }}
+                    />
+                    <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded-md bg-slate-950/85 backdrop-blur-xs text-[9px] font-extrabold text-emerald-400 border border-emerald-500/30">
+                      {p.price || 'Destaque'}
+                    </span>
+                  </div>
+                  <div className="p-2.5 flex flex-col flex-1 justify-between gap-2 text-left">
+                    <div>
+                      <h4 className="text-xs font-black text-white line-clamp-1">{p.title}</h4>
+                      {p.description && (
+                        <p className="text-[10px] text-slate-400 line-clamp-2 mt-0.5 leading-tight">
+                          {p.description}
+                        </p>
+                      )}
+                    </div>
+                    <a
+                      href={pWaUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="w-full py-1.5 px-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-extrabold text-[10px] rounded-xl flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all"
+                    >
+                      <Send className="w-3 h-3" />
+                      <span>Chamar no WhatsApp</span>
+                    </a>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* 4. Card Avaliação no Google (Google Reviews) */}
+        <div className="relative z-10 mb-3 p-3.5 rounded-2xl bg-gradient-to-br from-blue-950/40 via-amber-950/25 to-blue-950/40 border border-amber-400/40 shadow-lg text-left space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-xl bg-white flex items-center justify-center shadow-md">
+                <svg className="w-4 h-4" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+                </svg>
+              </div>
+              <div>
+                <span className="text-xs font-black text-white block">Avaliação no Google</span>
+                <div className="flex items-center text-amber-300 text-xs">
+                  ★★★★★
+                </div>
+              </div>
+            </div>
+            <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/30">
+              5.0 no Google
+            </span>
+          </div>
+          <p className="text-[10px] text-slate-300 leading-tight">
+            Sua opinião é fundamental para nossa empresa! Avalie nosso atendimento no Google em 5 segundos.
+          </p>
           <a
             href={config.googleReviewUrl || 'https://maps.google.com'}
             target="_blank"
             rel="noreferrer"
-            className="flex items-center justify-between p-3.5 rounded-2xl bg-gradient-to-r from-blue-950/40 via-amber-950/20 to-blue-950/40 border border-amber-400/40 hover:border-amber-400/70 transition-all cursor-pointer group shadow-sm active:scale-98"
+            className="w-full py-2 px-3 bg-gradient-to-r from-blue-600 via-sky-600 to-emerald-600 hover:from-blue-500 hover:to-emerald-500 text-white font-black text-xs rounded-xl flex items-center justify-center gap-2 shadow-md active:scale-95 transition-all"
           >
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-amber-500 flex items-center justify-center text-white shadow-md">
-                <Star className="w-5 h-5 fill-amber-300 text-amber-200" />
+            <Star className="w-3.5 h-3.5 fill-amber-300 text-amber-300" />
+            <span>Deixar Avaliação no Google (1-Clique)</span>
+          </a>
+        </div>
+
+        {/* 5. Card Pagamento PIX (Copia & Cola + QR Code) */}
+        <div className="relative z-10 mb-3 p-3.5 rounded-2xl bg-teal-950/20 border border-teal-500/30 shadow-md text-left space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-teal-400 to-emerald-600 flex items-center justify-center text-white shadow-sm">
+                <Zap className="w-4 h-4 fill-white" />
               </div>
-              <div className="text-left">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-black text-white">Avaliar no Google</span>
-                  <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-md bg-amber-400/20 text-amber-300">⭐⭐⭐⭐⭐</span>
-                </div>
-                <p className="text-[10px] text-slate-400">Avalie nosso atendimento em 5s</p>
+              <div>
+                <span className="text-xs font-black text-white block">Pagamento via Pix</span>
+                <span className="text-[9px] text-slate-400">Favorecido: {pixBeneficiary}</span>
               </div>
             </div>
-            <ExternalLink className="w-4 h-4 text-slate-500 group-hover:text-white group-hover:translate-x-0.5 transition-transform" />
-          </a>
+            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-teal-500/20 text-teal-300">
+              1-Toque
+            </span>
+          </div>
+          <div className="p-2 rounded-xl bg-black/40 border border-white/5 flex items-center justify-between gap-2">
+            <span className="font-mono text-[10px] text-slate-200 truncate">{config.pixKey || 'pix@empresa.com.br'}</span>
+            <span className="text-[8px] font-black uppercase text-slate-400">{(config.pixKeyType || 'pix').toUpperCase()}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={handlePixClick}
+              className="py-1.5 px-2 bg-teal-500 hover:bg-teal-400 text-slate-950 font-black text-[10px] rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition active:scale-95 shadow-sm"
+            >
+              {copiedPix ? <Check className="w-3 h-3 text-slate-950 stroke-[3]" /> : <Copy className="w-3 h-3" />}
+              <span>{copiedPix ? 'Chave Copiada!' : 'Copiar Chave'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveModal('pix')}
+              className="py-1.5 px-2 bg-white/10 hover:bg-white/15 text-white font-bold text-[10px] rounded-xl flex items-center justify-center gap-1.5 cursor-pointer border border-white/10 transition active:scale-95"
+            >
+              <QrCode className="w-3 h-3 text-teal-300" />
+              <span>Ver QR Code</span>
+            </button>
+          </div>
+        </div>
 
-          {/* 2. WhatsApp Direct */}
-          <a
-            href={whatsappUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="flex items-center justify-between p-3.5 rounded-2xl bg-emerald-950/20 border border-emerald-500/30 hover:border-emerald-500/60 transition-all cursor-pointer group shadow-sm active:scale-98"
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white shadow-md">
-                <Send className="w-5 h-5" />
-              </div>
-              <div className="text-left">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-black text-white">WhatsApp Direto</span>
-                  <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-md bg-emerald-500/20 text-emerald-300">1-Clique</span>
-                </div>
-                <p className="text-[10px] text-slate-400">Fale com nossa equipe agora</p>
-              </div>
-            </div>
-            <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-white group-hover:translate-x-0.5 transition-transform" />
-          </a>
-
-          {/* 3. 1-Click Wi-Fi Connect */}
+        {/* 6. Action Buttons List */}
+        <div className="relative z-10 space-y-2">
+          
+          {/* Wi-Fi 1-Click */}
           <button
             type="button"
             onClick={handleWifiClick}
-            className="w-full flex items-center justify-between p-3.5 rounded-2xl bg-sky-950/20 border border-sky-500/30 hover:border-sky-500/60 transition-all cursor-pointer group shadow-sm active:scale-98 text-left"
+            className="w-full flex items-center justify-between p-3 rounded-2xl bg-sky-950/20 border border-sky-500/30 hover:border-sky-500/60 transition-all cursor-pointer group shadow-sm active:scale-98 text-left"
           >
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-500 to-blue-600 flex items-center justify-center text-white shadow-md">
-                <Wifi className="w-5 h-5" />
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-sky-500 to-blue-600 flex items-center justify-center text-white shadow-md">
+                <Wifi className="w-4 h-4" />
               </div>
               <div>
                 <div className="flex items-center gap-1.5">
@@ -315,37 +559,38 @@ export const MiniSiteViewer: React.FC<MiniSiteViewerProps> = ({
             <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-white group-hover:translate-x-0.5 transition-transform" />
           </button>
 
-          {/* 4. 1-Click Pix Payment */}
-          <button
-            type="button"
-            onClick={handlePixClick}
-            className="w-full flex items-center justify-between p-3.5 rounded-2xl bg-teal-950/20 border border-teal-500/30 hover:border-teal-500/60 transition-all cursor-pointer group shadow-sm active:scale-98 text-left"
+          {/* WhatsApp Direct (Geral) */}
+          <a
+            href={whatsappUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center justify-between p-3 rounded-2xl bg-emerald-950/20 border border-emerald-500/30 hover:border-emerald-500/60 transition-all cursor-pointer group shadow-sm active:scale-98"
           >
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-teal-400 to-emerald-600 flex items-center justify-center text-white shadow-md">
-                <Zap className="w-5 h-5 fill-white" />
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white shadow-md">
+                <Send className="w-4 h-4" />
               </div>
-              <div>
+              <div className="text-left">
                 <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-black text-white">Pagamento via Pix</span>
-                  <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-md bg-teal-500/20 text-teal-300">Copia &amp; Cola</span>
+                  <span className="text-xs font-black text-white">WhatsApp Geral</span>
+                  <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-md bg-emerald-500/20 text-emerald-300">1-Clique</span>
                 </div>
-                <p className="text-[10px] text-slate-400">Copie a chave ou pague por QR</p>
+                <p className="text-[10px] text-slate-400">Fale com nossa equipe agora</p>
               </div>
             </div>
             <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-white group-hover:translate-x-0.5 transition-transform" />
-          </button>
+          </a>
 
-          {/* 5. Instagram */}
+          {/* Instagram */}
           <a
             href={config.instagramUrl || 'https://instagram.com'}
             target="_blank"
             rel="noreferrer"
-            className="flex items-center justify-between p-3.5 rounded-2xl bg-pink-950/20 border border-pink-500/30 hover:border-pink-500/60 transition-all cursor-pointer group shadow-sm active:scale-98"
+            className="flex items-center justify-between p-3 rounded-2xl bg-pink-950/20 border border-pink-500/30 hover:border-pink-500/60 transition-all cursor-pointer group shadow-sm active:scale-98"
           >
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 via-rose-500 to-purple-600 flex items-center justify-center text-white shadow-md">
-                <Radio className="w-5 h-5" />
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-amber-500 via-rose-500 to-purple-600 flex items-center justify-center text-white shadow-md">
+                <Radio className="w-4 h-4" />
               </div>
               <div className="text-left">
                 <div className="flex items-center gap-1.5">
@@ -358,17 +603,17 @@ export const MiniSiteViewer: React.FC<MiniSiteViewerProps> = ({
             <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-white group-hover:translate-x-0.5 transition-transform" />
           </a>
 
-          {/* 6. Endereço & Rota Google Maps (se cadastrado) */}
+          {/* Endereço & Rota Maps */}
           {config.address && (
             <a
               href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(config.address + ' ' + (config.city || ''))}`}
               target="_blank"
               rel="noreferrer"
-              className="flex items-center justify-between p-3.5 rounded-2xl bg-rose-950/20 border border-rose-500/30 hover:border-rose-500/60 transition-all cursor-pointer group shadow-sm active:scale-98"
+              className="flex items-center justify-between p-3 rounded-2xl bg-rose-950/20 border border-rose-500/30 hover:border-rose-500/60 transition-all cursor-pointer group shadow-sm active:scale-98"
             >
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-rose-500 to-amber-500 flex items-center justify-center text-white shadow-md">
-                  <MapPin className="w-5 h-5" />
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-rose-500 to-amber-500 flex items-center justify-center text-white shadow-md">
+                  <MapPin className="w-4 h-4" />
                 </div>
                 <div className="text-left">
                   <div className="flex items-center gap-1.5">
@@ -382,15 +627,15 @@ export const MiniSiteViewer: React.FC<MiniSiteViewerProps> = ({
             </a>
           )}
 
-          {/* 7. Ligar Direto (se cadastrado) */}
+          {/* Ligar Direto */}
           {config.phone && (
             <a
               href={`tel:${config.phone.replace(/\D/g, '')}`}
-              className="flex items-center justify-between p-3.5 rounded-2xl bg-blue-950/20 border border-blue-500/30 hover:border-blue-500/60 transition-all cursor-pointer group shadow-sm active:scale-98"
+              className="flex items-center justify-between p-3 rounded-2xl bg-blue-950/20 border border-blue-500/30 hover:border-blue-500/60 transition-all cursor-pointer group shadow-sm active:scale-98"
             >
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white shadow-md">
-                  <Phone className="w-5 h-5" />
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white shadow-md">
+                  <Phone className="w-4 h-4" />
                 </div>
                 <div className="text-left">
                   <div className="flex items-center gap-1.5">
@@ -404,20 +649,20 @@ export const MiniSiteViewer: React.FC<MiniSiteViewerProps> = ({
             </a>
           )}
 
-          {/* 8. Website (se configurado) */}
+          {/* Website / Catálogo Completo */}
           {config.websiteUrl && (
             <a
               href={config.websiteUrl}
               target="_blank"
               rel="noreferrer"
-              className="flex items-center justify-between p-3.5 rounded-2xl bg-indigo-950/20 border border-indigo-500/30 hover:border-indigo-500/60 transition-all cursor-pointer group shadow-sm active:scale-98"
+              className="flex items-center justify-between p-3 rounded-2xl bg-indigo-950/20 border border-indigo-500/30 hover:border-indigo-500/60 transition-all cursor-pointer group shadow-sm active:scale-98"
             >
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-md">
-                  <Globe className="w-5 h-5" />
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-md">
+                  <Globe className="w-4 h-4" />
                 </div>
                 <div className="text-left">
-                  <span className="text-xs font-black text-white block">Site Oficial &amp; Cardápio</span>
+                  <span className="text-xs font-black text-white block">Site Oficial &amp; Catálogo</span>
                   <p className="text-[10px] text-slate-400">Catálogo completo de serviços</p>
                 </div>
               </div>
@@ -425,17 +670,17 @@ export const MiniSiteViewer: React.FC<MiniSiteViewerProps> = ({
             </a>
           )}
 
-          {/* 9. Telegram (se configurado) */}
+          {/* Telegram */}
           {config.telegramUrl && (
             <a
               href={config.telegramUrl}
               target="_blank"
               rel="noreferrer"
-              className="flex items-center justify-between p-3.5 rounded-2xl bg-sky-950/20 border border-sky-400/30 hover:border-sky-400/60 transition-all cursor-pointer group shadow-sm active:scale-98"
+              className="flex items-center justify-between p-3 rounded-2xl bg-sky-950/20 border border-sky-400/30 hover:border-sky-400/60 transition-all cursor-pointer group shadow-sm active:scale-98"
             >
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-400 to-blue-500 flex items-center justify-center text-white shadow-md">
-                  <Send className="w-5 h-5" />
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-sky-400 to-blue-500 flex items-center justify-center text-white shadow-md">
+                  <Send className="w-4 h-4" />
                 </div>
                 <div className="text-left">
                   <span className="text-xs font-black text-white block">Canal no Telegram</span>
@@ -446,17 +691,17 @@ export const MiniSiteViewer: React.FC<MiniSiteViewerProps> = ({
             </a>
           )}
 
-          {/* 10. TikTok (se configurado) */}
+          {/* TikTok */}
           {config.tiktokUrl && (
             <a
               href={config.tiktokUrl}
               target="_blank"
               rel="noreferrer"
-              className="flex items-center justify-between p-3.5 rounded-2xl bg-neutral-900 border border-rose-500/30 hover:border-rose-500/60 transition-all cursor-pointer group shadow-sm active:scale-98"
+              className="flex items-center justify-between p-3 rounded-2xl bg-neutral-900 border border-rose-500/30 hover:border-rose-500/60 transition-all cursor-pointer group shadow-sm active:scale-98"
             >
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-black border border-rose-500/40 flex items-center justify-center text-white shadow-md">
-                  <Sparkles className="w-5 h-5 text-rose-400" />
+                <div className="w-9 h-9 rounded-xl bg-black border border-rose-500/40 flex items-center justify-center text-white shadow-md">
+                  <Sparkles className="w-4 h-4 text-rose-400" />
                 </div>
                 <div className="text-left">
                   <span className="text-xs font-black text-white block">TikTok Oficial</span>
@@ -465,6 +710,58 @@ export const MiniSiteViewer: React.FC<MiniSiteViewerProps> = ({
               </div>
               <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-white group-hover:translate-x-0.5 transition-transform" />
             </a>
+          )}
+
+          {/* Additional Services (se mais de 4 itens) */}
+          {additionalServices.length > 0 && (
+            <div className="pt-3 mt-3 border-t border-white/10 text-left space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-black uppercase tracking-wider text-sky-400 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Outros Serviços &amp; Produtos</span>
+                </span>
+                <span className="text-[9px] text-slate-400 font-semibold">
+                  {additionalServices.length} {additionalServices.length === 1 ? 'item' : 'itens'}
+                </span>
+              </div>
+
+              <div className="space-y-1.5">
+                {additionalServices.map((srv, idx) => {
+                  const srvWaUrl = buildMiniSiteWhatsappUrl(
+                    config.whatsappNumber || config.phone || '5511999999999',
+                    `Olá! Vi no Mini Site de ${name} o serviço "${srv.title}"${srv.price ? ` (${srv.price})` : ''} e gostaria de mais informações!`
+                  );
+                  return (
+                    <a
+                      key={srv.id || idx}
+                      href={srvWaUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center justify-between gap-2.5 p-2.5 rounded-xl bg-slate-900/90 border border-sky-500/25 hover:border-sky-400/60 transition group"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-xs font-black text-white">{srv.title}</span>
+                          {srv.price && (
+                            <span className="text-[9px] font-black px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                              {srv.price}
+                            </span>
+                          )}
+                        </div>
+                        {srv.description && (
+                          <p className="text-[10px] text-slate-400 mt-0.5 leading-snug line-clamp-1">
+                            {srv.description}
+                          </p>
+                        )}
+                      </div>
+                      <span className="shrink-0 px-2 py-1 rounded-lg bg-emerald-500 text-slate-950 font-black text-[9px] group-hover:bg-emerald-400 transition">
+                        Pedir
+                      </span>
+                    </a>
+                  );
+                })}
+              </div>
+            </div>
           )}
 
         </div>
@@ -668,22 +965,22 @@ export const MiniSiteViewer: React.FC<MiniSiteViewerProps> = ({
           {/* Navigation Sub-Tabs */}
           <div className="flex bg-slate-100 p-1.5 rounded-2xl border border-slate-200 gap-1 overflow-x-auto">
             <button
-              onClick={() => setActiveTab('preview')}
-              className={`flex-1 py-2 px-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shrink-0 ${
-                activeTab === 'preview' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <Smartphone className="w-3.5 h-3.5" />
-              <span>Visão Geral</span>
-            </button>
-            <button
               onClick={() => setActiveTab('edit')}
               className={`flex-1 py-2 px-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shrink-0 ${
-                activeTab === 'edit' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                activeTab === 'edit' ? 'bg-blue-600 text-white shadow-xs font-black' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               <Layers className="w-3.5 h-3.5" />
-              <span>Editar Dados</span>
+              <span>1. Subir Logo, Serviços &amp; Dados</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('preview')}
+              className={`flex-1 py-2 px-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shrink-0 ${
+                activeTab === 'preview' ? 'bg-white text-blue-700 shadow-xs font-black' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Smartphone className="w-3.5 h-3.5" />
+              <span>2. Link &amp; Visão Geral</span>
             </button>
             <button
               onClick={() => setActiveTab('vercel')}
@@ -693,9 +990,6 @@ export const MiniSiteViewer: React.FC<MiniSiteViewerProps> = ({
             >
               <span className="font-mono font-black text-xs">▲</span>
               <span>Hospedar na Vercel</span>
-              <span className="text-[9px] uppercase font-black px-1.5 py-0.2 rounded-md bg-emerald-500 text-slate-950">
-                Cliente
-              </span>
             </button>
             <button
               onClick={() => setActiveTab('export')}
@@ -732,6 +1026,23 @@ export const MiniSiteViewer: React.FC<MiniSiteViewerProps> = ({
                 <p className="text-[11px] text-slate-500">
                   Envie este link no WhatsApp para seu cliente testar, coloque na bio do Instagram ou grave diretamente na placa NFC.
                 </p>
+              </div>
+
+              {/* Quick shortcut to Logo & Services */}
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded-2xl flex items-center justify-between gap-3">
+                <div>
+                  <strong className="text-xs font-black text-blue-950 block">Personalizar Logotipo e Serviços do Cliente</strong>
+                  <p className="text-[11px] text-blue-800">
+                    Suba a logo da empresa e cadastre os serviços/preços para aparecerem no celular ao lado.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('edit')}
+                  className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shrink-0 cursor-pointer"
+                >
+                  Subir Logo &amp; Serviços
+                </button>
               </div>
 
               {/* Botões Ativos Overview Cards */}
@@ -829,12 +1140,196 @@ export const MiniSiteViewer: React.FC<MiniSiteViewerProps> = ({
             </div>
           )}
 
-          {/* TAB 2: EDIT BUTTONS & DETAILS */}
+          {/* TAB 2: EDIT LOGO, SERVICES & DETAILS */}
           {activeTab === 'edit' && (
-            <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm space-y-4 max-h-[620px] overflow-y-auto">
-              <div className="flex items-center justify-between">
-                <h4 className="text-xs font-black uppercase text-slate-700 tracking-wider">Personalizar Dados do Mini Site</h4>
-                <span className="text-[10px] text-slate-400 font-semibold">Salva em tempo real</span>
+            <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm space-y-5 max-h-[760px] overflow-y-auto">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div>
+                  <h4 className="text-sm font-black uppercase text-slate-900 tracking-tight">
+                    Logotipo, Serviços &amp; Dados do Cliente
+                  </h4>
+                  <p className="text-[11px] text-slate-500">
+                    Suba a logo da empresa e adicione os serviços que aparecerão no Mini Site.
+                  </p>
+                </div>
+                {onSaveConfig && (
+                  <button
+                    type="button"
+                    disabled={isSavingConfig}
+                    onClick={async () => {
+                      setIsSavingConfig(true);
+                      try {
+                        await onSaveConfig(config);
+                        showToast('Mini Site salvo com sucesso no banco de dados!');
+                      } finally {
+                        setIsSavingConfig(false);
+                      }
+                    }}
+                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-sm shrink-0"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>{isSavingConfig ? 'Salvando...' : 'Salvar Tudo'}</span>
+                  </button>
+                )}
+              </div>
+
+              {/* 1. UPLOAD DE LOGOTIPO DO CLIENTE */}
+              <div className="p-4 bg-gradient-to-r from-blue-50 via-indigo-50/60 to-sky-50 border-2 border-blue-200 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black uppercase text-blue-950 flex items-center gap-1.5">
+                    <ImageIcon className="w-4 h-4 text-blue-600" />
+                    1. Logotipo da Empresa / Cliente
+                  </span>
+                  {config.logoUrl && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const updated = { ...config, logoUrl: '' };
+                        if (onChangeConfig) onChangeConfig(updated);
+                        if (onSaveConfig) onSaveConfig(updated);
+                      }}
+                      className="text-[10px] font-bold text-red-600 hover:underline cursor-pointer"
+                    >
+                      Remover Logo
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-center gap-3.5">
+                  <div className="w-16 h-16 rounded-2xl bg-slate-900 border-2 border-blue-300 flex items-center justify-center overflow-hidden shrink-0 shadow-md">
+                    {config.logoUrl ? (
+                      <img src={config.logoUrl} alt="Logo" className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-xl font-black text-white">{initial}</span>
+                    )}
+                  </div>
+
+                  <div className="flex-1 w-full space-y-2">
+                    <label className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs rounded-xl flex items-center justify-center gap-2 cursor-pointer shadow-sm transition">
+                      <Upload className="w-4 h-4" />
+                      <span>Subir Imagem da Logo (Celular ou Computador)</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleLogoFileUpload}
+                        className="hidden"
+                      />
+                    </label>
+
+                    <input
+                      type="text"
+                      value={config.logoUrl || ''}
+                      onChange={(e) => onChangeConfig && onChangeConfig({ ...config, logoUrl: e.target.value })}
+                      placeholder="Ou cole aqui o link/URL da imagem da logo..."
+                      className="w-full bg-white border border-blue-200 rounded-xl p-2 text-xs font-semibold text-slate-700 focus:outline-blue-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. CATÁLOGO DE SERVIÇOS E PRODUTOS DO CLIENTE */}
+              <div className="p-4 bg-emerald-50/70 border-2 border-emerald-200 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <span className="text-xs font-black uppercase text-emerald-950 flex items-center gap-1.5">
+                      <Briefcase className="w-4 h-4 text-emerald-600" />
+                      2. Serviços &amp; Produtos do Cliente no Mini Site
+                    </span>
+                    <p className="text-[11px] text-emerald-800">
+                      Cadastre os serviços do cliente para que os visitantes peçam orçamento em 1 clique no WhatsApp.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleGenerateDefaultServices}
+                    className="px-2.5 py-1.5 bg-white hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-[10px] font-black flex items-center gap-1 cursor-pointer transition"
+                  >
+                    <Sparkles className="w-3 h-3 text-emerald-600" />
+                    <span>+ Sugerir Serviços do Nicho</span>
+                  </button>
+                </div>
+
+                {/* Add new service form */}
+                <div className="bg-white p-3 rounded-xl border border-emerald-200 space-y-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div className="sm:col-span-2">
+                      <label className="block text-[10px] font-bold text-slate-600">Nome do Serviço ou Produto (*)</label>
+                      <input
+                        type="text"
+                        value={newServiceTitle}
+                        onChange={(e) => setNewServiceTitle(e.target.value)}
+                        placeholder="Ex: Limpeza Dental, Pizza Grande, Corte + Barba..."
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-semibold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-600">Preço / Condição</label>
+                      <input
+                        type="text"
+                        value={newServicePrice}
+                        onChange={(e) => setNewServicePrice(e.target.value)}
+                        placeholder="Ex: R$ 99,00 ou Sob Consulta"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-semibold"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      type="text"
+                      value={newServiceDesc}
+                      onChange={(e) => setNewServiceDesc(e.target.value)}
+                      placeholder="Descrição curta do serviço (opcional)..."
+                      className="flex-1 bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-semibold"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddService}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-lg flex items-center justify-center gap-1.5 cursor-pointer shrink-0 shadow-xs"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>Adicionar Serviço</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* List of registered services */}
+                {config.services && config.services.length > 0 ? (
+                  <div className="space-y-1.5">
+                    {config.services.map((srv, idx) => (
+                      <div
+                        key={srv.id || idx}
+                        className="bg-white border border-emerald-200/80 rounded-xl p-2.5 flex items-center justify-between gap-2"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <strong className="text-xs font-black text-slate-900">{srv.title}</strong>
+                            {srv.price && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800">
+                                {srv.price}
+                              </span>
+                            )}
+                          </div>
+                          {srv.description && (
+                            <p className="text-[11px] text-slate-500 truncate">{srv.description}</p>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveService(idx)}
+                          className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-red-50 transition cursor-pointer"
+                          title="Remover serviço"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-emerald-800/80 italic text-center py-1">
+                    Nenhum serviço cadastrado ainda. Adicione acima ou clique em &ldquo;+ Sugerir Serviços do Nicho&rdquo;.
+                  </p>
+                )}
               </div>
 
               {/* Company Info */}
@@ -887,18 +1382,7 @@ export const MiniSiteViewer: React.FC<MiniSiteViewerProps> = ({
                   type="text"
                   value={config.tagline || ''}
                   onChange={(e) => onChangeConfig && onChangeConfig({ ...config, tagline: e.target.value })}
-                  placeholder="Ex: O melhor café artesanal da cidade"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs font-semibold focus:outline-sky-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-slate-700 mb-1">URL do Logo (Opcional)</label>
-                <input
-                  type="text"
-                  value={config.logoUrl || ''}
-                  onChange={(e) => onChangeConfig && onChangeConfig({ ...config, logoUrl: e.target.value })}
-                  placeholder="https://exemplo.com/logo.png"
+                  placeholder="Ex: O melhor atendimento da cidade"
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs font-semibold focus:outline-sky-500"
                 />
               </div>

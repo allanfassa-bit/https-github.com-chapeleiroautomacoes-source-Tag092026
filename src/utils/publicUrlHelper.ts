@@ -14,22 +14,30 @@ export function getPublicAppOrigin(): string {
   try {
     const custom = localStorage.getItem('alf_custom_public_domain');
     if (custom && custom.trim().startsWith('http')) {
-      return custom.trim().replace(/\/+$/, '');
+      const cleanCustom = custom.trim().replace(/\/+$/, '');
+      const isTempOrLocal =
+        cleanCustom.includes('localhost') ||
+        cleanCustom.includes('127.0.0.1') ||
+        cleanCustom.includes('.run.app') ||
+        cleanCustom.includes('scf.usercontent.goog');
+      if (!isTempOrLocal) {
+        return cleanCustom;
+      }
     }
   } catch (_) {}
 
   const origin = window.location.origin || '';
 
-  // CRITICAL: NEVER use ais-dev-... for public links, QR codes, or plate artwork!
-  // ais-dev- is Google AI Studio's internal dev container with private auth cookies.
-  // External phones or visitors scanning it will get a Google 403 / Build Error screen.
-  // Instead, route directly to the production Render deployment which is live and public:
-  if (!origin || origin.includes('ais-dev-') || origin.includes('localhost') || origin.includes('127.0.0.1')) {
-    return DEFAULT_RENDER_DOMAIN;
-  }
-
-  // If on shared preview ais-pre- without custom domain, use Render for zero-friction client scans
-  if (origin.includes('ais-pre-')) {
+  // CRITICAL: NEVER use ais-dev-... or .run.app for public links, QR codes, or plate artwork!
+  // Always route directly to https://automacaonfc.onrender.com unless on a custom production domain:
+  if (
+    !origin ||
+    origin.includes('ais-dev-') ||
+    origin.includes('ais-pre-') ||
+    origin.includes('.run.app') ||
+    origin.includes('localhost') ||
+    origin.includes('127.0.0.1')
+  ) {
     return DEFAULT_RENDER_DOMAIN;
   }
 

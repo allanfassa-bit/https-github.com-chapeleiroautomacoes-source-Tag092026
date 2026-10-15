@@ -33,10 +33,17 @@ import {
   ArrowLeft,
   Filter,
   Check,
-  Printer
+  Printer,
+  Upload,
+  Image as ImageIcon,
+  Briefcase,
+  Smartphone,
+  X
 } from 'lucide-react';
 import { Lead, Pitch, SiteTemplate, PRESET_NICHES } from '../App';
 import { getPublicAppOrigin } from '../utils/publicUrlHelper';
+import { MiniSiteViewer } from './MiniSiteViewer';
+import { MiniSiteConfig } from '../utils/miniSiteExporter';
 
 interface LeadManagementModuleProps {
   leads: Lead[];
@@ -172,13 +179,107 @@ export function LeadManagementModule(props: LeadManagementModuleProps) {
 
   // Edit lead form local state
   const [isEditingLeadData, setIsEditingLeadData] = useState(false);
+  const [editLeadName, setEditLeadName] = useState('');
+  const [editLeadNiche, setEditLeadNiche] = useState('');
+  const [editLeadCity, setEditLeadCity] = useState('');
   const [editLeadAddress, setEditLeadAddress] = useState('');
   const [editLeadPhone, setEditLeadPhone] = useState('');
   const [editLeadGoogleMapsUrl, setEditLeadGoogleMapsUrl] = useState('');
   const [editLeadPortalUsername, setEditLeadPortalUsername] = useState('');
   const [editLeadNfcPassword, setEditLeadNfcPassword] = useState('');
+  const [isNewClientModalOpen, setIsNewClientModalOpen] = useState(false);
+  const [newClientName, setNewClientName] = useState('');
+  const [newClientNiche, setNewClientNiche] = useState('Clínica / Comércio Local');
+  const [newClientCity, setNewClientCity] = useState('São Paulo');
+  const [newClientPhone, setNewClientPhone] = useState('');
+  const [newClientAddress, setNewClientAddress] = useState('');
+  const [newClientLogoUrl, setNewClientLogoUrl] = useState('');
+  const [newClientServicesText, setNewClientServicesText] = useState('Atendimento Especializado | Orçamento Grátis\nPacote Completo VIP | Condição Especial');
 
-  // Filtering calculations
+  const getLeadMiniSiteConfig = (lead: Lead): MiniSiteConfig => {
+    const saved = lead.miniSiteConfig && typeof lead.miniSiteConfig === 'object' ? lead.miniSiteConfig : {};
+    return {
+      id: lead.id,
+      companyName: saved.companyName || lead.name || 'Sua Empresa',
+      niche: saved.niche || lead.niche || 'Atendimento Exclusivo',
+      city: saved.city || lead.city || 'Brasil',
+      tagline: saved.tagline || `${lead.niche || 'Especialista'} de referência em ${lead.city || 'sua região'}`,
+      logoUrl: saved.logoUrl || '',
+      whatsappNumber: saved.whatsappNumber || lead.nfcWhatsappNum || lead.phone || '',
+      whatsappMessage: saved.whatsappMessage || lead.nfcWhatsappMsg || `Olá! Vi o Mini Site de ${lead.name} e gostaria de atendimento.`,
+      instagramUrl: saved.instagramUrl || lead.nfcInstagramUrl || '',
+      googleReviewUrl: saved.googleReviewUrl || lead.googleMapsUrl || '',
+      address: saved.address || lead.address || '',
+      phone: saved.phone || lead.phone || '',
+      openingHours: saved.openingHours || 'Seg a Sáb: 08h às 19h',
+      pixKey: saved.pixKey || '',
+      pixBeneficiary: saved.pixBeneficiary || lead.name || '',
+      wifiSsid: saved.wifiSsid || `${(lead.name || 'Cliente').replace(/\s+/g, '_')}_WiFi`,
+      wifiPassword: saved.wifiPassword || '',
+      services: Array.isArray(saved.services) ? saved.services : []
+    };
+  };
+
+  const handleCreateManualClient = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newClientName.trim()) return;
+    const slugId = newClientName
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 32) || `cliente-${Date.now()}`;
+
+    const parsedServices = newClientServicesText
+      .split('\n')
+      .map((line, i) => {
+        const [titlePart, pricePart] = line.split('|');
+        return {
+          id: `srv_${Date.now()}_${i}`,
+          title: (titlePart || '').trim(),
+          price: (pricePart || 'Consultar').trim(),
+          description: 'Solicite atendimento ou orçamento rápido pelo WhatsApp.'
+        };
+      })
+      .filter((s) => s.title.length > 0);
+
+    const newLeadObj: Lead = {
+      id: slugId,
+      name: newClientName.trim(),
+      niche: newClientNiche.trim() || 'Comércio Local',
+      city: newClientCity.trim() || 'Brasil',
+      phone: newClientPhone.trim(),
+      address: newClientAddress.trim(),
+      rating: 5.0,
+      reviewCount: 12,
+      hasWebsite: true,
+      websiteUrl: null,
+      googleMapsUrl: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(newClientName.trim() + ' ' + newClientCity.trim())}`,
+      weakness: 'Mini-Site & Placa NFC Ativa',
+      stage: 'won',
+      nfcRedirectActive: 'minisite',
+      miniSiteConfig: {
+        id: slugId,
+        companyName: newClientName.trim(),
+        niche: newClientNiche.trim() || 'Comércio Local',
+        city: newClientCity.trim() || 'Brasil',
+        logoUrl: newClientLogoUrl,
+        whatsappNumber: newClientPhone.trim(),
+        address: newClientAddress.trim(),
+        phone: newClientPhone.trim(),
+        services: parsedServices
+      }
+    };
+
+    await updateLeadDetails(slugId, newLeadObj);
+    setIsNewClientModalOpen(false);
+    setNewClientName('');
+    setNewClientLogoUrl('');
+    handleSelectLead(newLeadObj);
+    setLeadDetailTab('site');
+  };
   const normalizeFilterText = (s: string) =>
     (s || '')
       .toLowerCase()
@@ -287,15 +388,24 @@ export function LeadManagementModule(props: LeadManagementModuleProps) {
     return sortedLeads.findIndex((l) => l.id === selectedLead.id);
   }, [sortedLeads, selectedLead]);
 
-  const handleSelectLead = (lead: Lead) => {
+  const handleSelectLead = (lead: Lead, initialSubTab?: 'overview' | 'nfc' | 'site' | 'pitch' | 'edit') => {
     setSelectedLead(lead);
     generateSalesPitch(lead);
     setIsEditingLeadData(false);
+    setEditLeadName(lead.name || '');
+    setEditLeadNiche(lead.niche || '');
+    setEditLeadCity(lead.city || '');
     setEditLeadAddress(lead.address || '');
     setEditLeadPhone(lead.phone || '');
     setEditLeadGoogleMapsUrl(lead.googleMapsUrl || '');
     setEditLeadPortalUsername(lead.portalUsername || lead.id);
     setEditLeadNfcPassword(lead.nfcPassword || '2026');
+    if (initialSubTab) {
+      setLeadDetailTab(initialSubTab);
+    }
+    try {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (_) {}
   };
 
   const handleNextLead = () => {
@@ -317,7 +427,10 @@ export function LeadManagementModule(props: LeadManagementModuleProps) {
         <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl overflow-x-auto scrollbar-none">
           <button
             type="button"
-            onClick={() => setLeadsSubTab('directory')}
+            onClick={() => {
+              setLeadsSubTab('directory');
+              setSelectedLead(null);
+            }}
             className={`px-3.5 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-2 cursor-pointer shrink-0 ${
               leadsSubTab === 'directory'
                 ? 'bg-white text-slate-900 shadow-xs font-black'
@@ -358,23 +471,32 @@ export function LeadManagementModule(props: LeadManagementModuleProps) {
           </button>
         </div>
 
-        {/* Action button */}
-        <div className="flex items-center gap-2 justify-end text-xs">
+        {/* Action buttons */}
+        <div className="flex flex-wrap items-center gap-2 justify-end text-xs">
           {selectedLead && leadsSubTab === 'directory' && (
             <button
               type="button"
               onClick={() => setSelectedLead(null)}
-              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer text-xs"
+              className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer text-xs"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Ver Catálogo Completo</span>
+              <span>Voltar p/ Lista</span>
             </button>
           )}
 
           <button
             type="button"
+            onClick={() => setIsNewClientModalOpen(true)}
+            className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black rounded-xl transition flex items-center gap-1.5 cursor-pointer text-xs shadow-sm"
+          >
+            <Plus className="w-4 h-4" />
+            <span>+ Cadastrar Cliente &amp; Mini-Site (Logo/Serviços)</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setLeadsSubTab(leadsSubTab === 'search' ? 'directory' : 'search')}
-            className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-xl transition flex items-center gap-1.5 cursor-pointer text-xs shadow-xs"
+            className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-xl transition flex items-center gap-1.5 cursor-pointer text-xs shadow-xs"
           >
             {leadsSubTab === 'search' ? (
               <>
@@ -681,12 +803,12 @@ export function LeadManagementModule(props: LeadManagementModuleProps) {
                   onClick={() => setLeadDetailTab('site')}
                   className={`px-3.5 py-2 text-xs font-bold rounded-t-xl transition-all flex items-center gap-1.5 cursor-pointer shrink-0 border-b-2 ${
                     leadDetailTab === 'site'
-                      ? 'bg-white text-emerald-900 border-emerald-600 shadow-2xs font-black'
-                      : 'text-slate-600 border-transparent hover:text-slate-900'
+                      ? 'bg-emerald-50 text-emerald-950 border-emerald-600 shadow-2xs font-black'
+                      : 'text-emerald-700 bg-emerald-50/40 border-transparent hover:text-emerald-950'
                   }`}
                 >
-                  <Globe className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Site Modelo Demonstrativo</span>
+                  <Smartphone className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>🌐 Mini-Site, Logotipo &amp; Serviços</span>
                 </button>
 
                 <button
@@ -705,6 +827,9 @@ export function LeadManagementModule(props: LeadManagementModuleProps) {
                 <button
                   type="button"
                   onClick={() => {
+                    setEditLeadName(selectedLead.name || '');
+                    setEditLeadNiche(selectedLead.niche || '');
+                    setEditLeadCity(selectedLead.city || '');
                     setEditLeadAddress(selectedLead.address || '');
                     setEditLeadPhone(selectedLead.phone || '');
                     setEditLeadGoogleMapsUrl(selectedLead.googleMapsUrl || '');
@@ -753,8 +878,8 @@ export function LeadManagementModule(props: LeadManagementModuleProps) {
                       onClick={() => setLeadDetailTab('site')}
                       className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black py-2.5 px-4 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer uppercase tracking-wider shadow-sm"
                     >
-                      <Globe className="h-3.5 w-3.5" />
-                      <span>Ver Site Modelo</span>
+                      <Smartphone className="h-3.5 w-3.5" />
+                      <span>🌐 Criar / Editar Mini-Site (Subir Logo &amp; Serviços)</span>
                     </button>
                   </div>
 
@@ -774,9 +899,17 @@ export function LeadManagementModule(props: LeadManagementModuleProps) {
                       <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Status Comercial &amp; Portal</span>
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-bold text-slate-700">Etapa no Funil:</span>
-                        <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-blue-100 text-blue-800">
-                          {selectedLead.stage ? selectedLead.stage.toUpperCase() : 'NÃO INICIADO'}
-                        </span>
+                        <select
+                          value={selectedLead.stage || 'to_contact'}
+                          onChange={(e) => updateLeadStage(selectedLead.id, e.target.value as any)}
+                          className="text-[11px] font-bold px-2 py-1 rounded-lg bg-blue-100 text-blue-800 border border-blue-200 cursor-pointer focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                        >
+                          <option value="to_contact">📞 A CONTATAR</option>
+                          <option value="contacted">💬 CONTATADO</option>
+                          <option value="proposal">📑 PROPOSTA ENVIADA</option>
+                          <option value="won">🏆 FECHADO 🎉</option>
+                          <option value="lost">⏸️ RECUSADO</option>
+                        </select>
                       </div>
                       <p className="text-xs text-slate-600">
                         Código ID: <strong className="font-mono text-blue-700">{selectedLead.id}</strong>
@@ -828,31 +961,66 @@ export function LeadManagementModule(props: LeadManagementModuleProps) {
                 </div>
               )}
 
-              {/* Tab 3: Site Model */}
+              {/* Tab 3: Mini-Site, Logo & Services Studio + Institutional Site */}
               {leadDetailTab === 'site' && (
-                <div className="p-6 space-y-5">
-                  <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl space-y-3">
-                    <h4 className="text-sm font-black text-emerald-950 flex items-center gap-2">
-                      <Globe className="w-4 h-4 text-emerald-700" />
-                      <span>Site Institucional Demonstrativo</span>
-                    </h4>
-                    <p className="text-xs text-emerald-800 leading-relaxed">
-                      Crie um site modelo moderno de alta conversão para mostrar ao dono da empresa como o negócio dele pode parecer muito mais profissional na internet.
-                    </p>
-                    <div className="flex flex-wrap gap-2 pt-1">
+                <div className="p-4 sm:p-6 space-y-6 bg-slate-50/60">
+                  <MiniSiteViewer
+                    leadId={selectedLead.id}
+                    config={getLeadMiniSiteConfig(selectedLead)}
+                    isLinkedToNfc={selectedLead.nfcRedirectActive === 'minisite'}
+                    onChangeConfig={(updatedConfig) => {
+                      const updatedLead = {
+                        ...selectedLead,
+                        name: updatedConfig.companyName || selectedLead.name,
+                        niche: updatedConfig.niche || selectedLead.niche,
+                        city: updatedConfig.city || selectedLead.city,
+                        miniSiteConfig: updatedConfig
+                      };
+                      setSelectedLead(updatedLead);
+                    }}
+                    onSaveConfig={async (updatedConfig) => {
+                      await updateLeadDetails(selectedLead.id, {
+                        name: updatedConfig.companyName || selectedLead.name,
+                        niche: updatedConfig.niche || selectedLead.niche,
+                        city: updatedConfig.city || selectedLead.city,
+                        address: updatedConfig.address || selectedLead.address,
+                        phone: updatedConfig.phone || selectedLead.phone,
+                        miniSiteConfig: updatedConfig
+                      });
+                    }}
+                    onLinkToNfc={async () => {
+                      await updateLeadDetails(selectedLead.id, {
+                        nfcRedirectActive: 'minisite',
+                        miniSiteConfig: getLeadMiniSiteConfig(selectedLead)
+                      });
+                    }}
+                  />
+
+                  <div className="p-4 bg-white border border-slate-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-xs font-black uppercase text-slate-800 flex items-center gap-1.5">
+                        <Globe className="w-4 h-4 text-blue-600" />
+                        <span>Site Institucional Completo (Landing Page Desktop + Mobile)</span>
+                      </h4>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Além do Mini-Site acima, você também pode gerar uma Landing Page completa com Inteligência Artificial ou exportar em ZIP.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2 shrink-0">
                       <button
-                        onClick={() => requireMasterAccess('site_preview', () => generateWebsiteTemplate(selectedLead))}
+                        onClick={() => {
+                          setActiveTab('site_preview');
+                          generateWebsiteTemplate(selectedLead);
+                        }}
                         className="bg-slate-950 hover:bg-slate-900 text-white text-xs font-black py-2.5 px-4 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
                       >
                         <Sparkles className="h-3.5 w-3.5 text-cyan-400" />
-                        <span>Gerar Site Modelo com IA</span>
+                        <span>Gerar Landing Page com IA</span>
                       </button>
                       <button
-                        onClick={() => {
-                          requireMasterAccess('site_preview', async () => {
-                            if (!siteTemplate) await generateWebsiteTemplate(selectedLead);
-                            setIsExportSiteModalOpen(true);
-                          });
+                        onClick={async () => {
+                          if (!siteTemplate) await generateWebsiteTemplate(selectedLead);
+                          setIsExportSiteModalOpen(true);
                         }}
                         className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black py-2.5 px-4 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
                       >
@@ -928,6 +1096,52 @@ export function LeadManagementModule(props: LeadManagementModuleProps) {
               {/* Tab 5: Edit Data */}
               {leadDetailTab === 'edit' && (
                 <div className="p-6 space-y-4">
+                  <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <strong className="text-xs font-black text-emerald-950 block">Deseja subir o Logotipo e os Serviços do Mini-Site?</strong>
+                      <p className="text-[11px] text-emerald-800">
+                        Use o editor visual do Mini-Site para enviar a imagem da logo e cadastrar os serviços com botão de WhatsApp.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setLeadDetailTab('site')}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl shrink-0 cursor-pointer"
+                    >
+                      Abrir Editor de Logo &amp; Serviços
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="space-y-1">
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Nome da Empresa</label>
+                      <input
+                        type="text"
+                        value={editLeadName}
+                        onChange={(e) => setEditLeadName(e.target.value)}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:outline-blue-500"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Nicho / Segmento</label>
+                      <input
+                        type="text"
+                        value={editLeadNiche}
+                        onChange={(e) => setEditLeadNiche(e.target.value)}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:outline-blue-500"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Cidade</label>
+                      <input
+                        type="text"
+                        value={editLeadCity}
+                        onChange={(e) => setEditLeadCity(e.target.value)}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-semibold focus:outline-blue-500"
+                      />
+                    </div>
+                  </div>
+
                   <div className="space-y-3">
                     <div className="space-y-1">
                       <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Endereço</label>
@@ -940,7 +1154,7 @@ export function LeadManagementModule(props: LeadManagementModuleProps) {
                     </div>
 
                     <div className="space-y-1">
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Telefone</label>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Telefone / WhatsApp</label>
                       <input
                         type="text"
                         value={editLeadPhone}
@@ -964,13 +1178,15 @@ export function LeadManagementModule(props: LeadManagementModuleProps) {
                         type="button"
                         onClick={async () => {
                           await updateLeadDetails(selectedLead.id, {
+                            name: editLeadName.trim() || selectedLead.name,
+                            niche: editLeadNiche.trim() || selectedLead.niche,
+                            city: editLeadCity.trim() || selectedLead.city,
                             address: editLeadAddress.trim(),
                             phone: editLeadPhone.trim(),
                             googleMapsUrl: editLeadGoogleMapsUrl.trim(),
                             portalUsername: editLeadPortalUsername.trim(),
                             nfcPassword: editLeadNfcPassword.trim()
                           });
-                          alert('Cadastro atualizado com sucesso!');
                           setLeadDetailTab('overview');
                         }}
                         className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-black uppercase rounded-xl transition cursor-pointer"
@@ -1078,8 +1294,20 @@ export function LeadManagementModule(props: LeadManagementModuleProps) {
                           </div>
                         </div>
 
-                        <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs">
-                          <span className="font-mono text-[10px] text-slate-400">/r/{lead.id}</span>
+                        <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100 text-xs">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSelectLead(lead, 'site');
+                            }}
+                            className="px-2.5 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-black text-[11px] flex items-center gap-1 transition cursor-pointer"
+                            title="Subir logotipo, cadastrar serviços e ver o Mini-Site deste cliente"
+                          >
+                            <Smartphone className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Mini-Site &amp; Logo</span>
+                          </button>
+
                           <span className="font-bold text-blue-600 group-hover:translate-x-0.5 transition flex items-center gap-1">
                             <span>Gerenciar</span>
                             <ArrowRight className="w-3.5 h-3.5" />
@@ -1261,6 +1489,176 @@ export function LeadManagementModule(props: LeadManagementModuleProps) {
                 />
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CADASTRAR NOVO CLIENTE COM LOGO & SERVIÇOS P/ MINI-SITE */}
+      {isNewClientModalOpen && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-150"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsNewClientModalOpen(false);
+          }}
+        >
+          <div className="bg-white border border-slate-200 rounded-3xl max-w-lg w-full max-h-[90dvh] flex flex-col shadow-2xl overflow-hidden text-left">
+            <div className="px-5 py-4 bg-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Smartphone className="w-5 h-5 text-emerald-400" />
+                <div>
+                  <h3 className="text-sm font-black">Novo Cliente &amp; Mini-Site Personalizado</h3>
+                  <p className="text-[11px] text-slate-400">Cadastre a empresa, suba a logo e adicione os serviços</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsNewClientModalOpen(false)}
+                className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center gap-1 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+                <span>Fechar</span>
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateManualClient} className="p-5 overflow-y-auto space-y-3.5 flex-1">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Nome da Empresa / Cliente (*)</label>
+                  <input
+                    type="text"
+                    required
+                    value={newClientName}
+                    onChange={(e) => setNewClientName(e.target.value)}
+                    placeholder="Ex: Clínica Sorriso Real"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Nicho / Ramo (*)</label>
+                  <input
+                    type="text"
+                    required
+                    value={newClientNiche}
+                    onChange={(e) => setNewClientNiche(e.target.value)}
+                    placeholder="Ex: Odontologia, Pizzaria, Estética"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Cidade / UF</label>
+                  <input
+                    type="text"
+                    value={newClientCity}
+                    onChange={(e) => setNewClientCity(e.target.value)}
+                    placeholder="Ex: São Paulo - SP"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 mb-1">WhatsApp com DDD</label>
+                  <input
+                    type="text"
+                    value={newClientPhone}
+                    onChange={(e) => setNewClientPhone(e.target.value)}
+                    placeholder="Ex: (11) 99999-9999"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">Endereço Completo</label>
+                <input
+                  type="text"
+                  value={newClientAddress}
+                  onChange={(e) => setNewClientAddress(e.target.value)}
+                  placeholder="Rua, Número, Bairro"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold"
+                />
+              </div>
+
+              {/* Upload de Logo no Cadastro Rápido */}
+              <div className="p-3.5 bg-blue-50 border border-blue-200 rounded-2xl space-y-2">
+                <label className="block text-[11px] font-black text-blue-950 uppercase">
+                  Logotipo do Cliente (Subir Arquivo ou Link)
+                </label>
+                <div className="flex items-center gap-3">
+                  {newClientLogoUrl && (
+                    <img src={newClientLogoUrl} alt="Preview" className="w-12 h-12 rounded-xl object-cover border border-blue-300 shrink-0" />
+                  )}
+                  <label className="flex-1 py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs rounded-xl flex items-center justify-center gap-1.5 cursor-pointer">
+                    <Upload className="w-4 h-4" />
+                    <span>Escolher Imagem da Logo</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const reader = new FileReader();
+                        reader.onload = (ev) => {
+                          const img = new Image();
+                          img.onload = () => {
+                            const canvas = document.createElement('canvas');
+                            const maxDim = 260;
+                            let w = img.width;
+                            let h = img.height;
+                            if (w > h && w > maxDim) {
+                              h = Math.round((h * maxDim) / w);
+                              w = maxDim;
+                            } else if (h > maxDim) {
+                              w = Math.round((w * maxDim) / h);
+                              h = maxDim;
+                            }
+                            canvas.width = w;
+                            canvas.height = h;
+                            const ctx = canvas.getContext('2d');
+                            if (ctx) {
+                              ctx.drawImage(img, 0, 0, w, h);
+                              setNewClientLogoUrl(canvas.toDataURL('image/png', 0.9));
+                            }
+                          };
+                          if (typeof ev.target?.result === 'string') img.src = ev.target.result;
+                        };
+                        reader.readAsDataURL(file);
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Serviços Iniciais do Cliente (1 por linha: Nome | Preço)
+                </label>
+                <textarea
+                  rows={3}
+                  value={newClientServicesText}
+                  onChange={(e) => setNewClientServicesText(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsNewClientModalOpen(false)}
+                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black uppercase rounded-xl cursor-pointer shadow-md"
+                >
+                  Criar Cliente &amp; Abrir Mini-Site
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
